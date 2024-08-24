@@ -1,7 +1,7 @@
 package tree_sitter
 
 /*
-#cgo CFLAGS: -I${SRCDIR}/tree-sitter/lib/include -I${SRCDIR}/tree-sitter/lib/src -std=c11
+#cgo CFLAGS: -I${SRCDIR}/tree-sitter/lib/include -I${SRCDIR}/tree-sitter/lib/src
 #include <tree_sitter/api.h>
 */
 import "C"
@@ -360,5 +360,5 @@ func (n *Node) Walk() *TreeCursor {
 // use [Node.Edit] when you have a specific [Node] instance that
 // you want to keep and continue to use after an edit.
 func (n *Node) Edit(edit *InputEdit) {
-	C.ts_node_edit(&n._inner, edit.ToTSInputEdit())
+	C.ts_node_edit(&n._inner, edit.toTSInputEdit())
 }

@@ -43,7 +43,7 @@ func (t *Tree) Language() *Language {
 // You must describe the edit both in terms of byte offsets and in terms of
 // row/column coordinates.
 func (t *Tree) Edit(edit *InputEdit) {
-	C.ts_tree_edit(t._inner, edit.ToTSInputEdit())
+	C.ts_tree_edit(t._inner, edit.toTSInputEdit())
 }
 
 // Create a new [TreeCursor] starting from the root of the tree.

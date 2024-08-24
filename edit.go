@@ -15,7 +15,7 @@ type InputEdit struct {
 	NewEndPosition Point
 }
 
-func (i *InputEdit) ToTSInputEdit() *C.TSInputEdit {
+func (i *InputEdit) toTSInputEdit() *C.TSInputEdit {
 	return &C.TSInputEdit{
 		start_byte:    C.uint(i.StartByte),
 		old_end_byte:  C.uint(i.OldEndByte),
@@ -24,13 +24,4 @@ func (i *InputEdit) ToTSInputEdit() *C.TSInputEdit {
 		old_end_point: i.OldEndPosition.toTSPoint(),
 		new_end_point: i.NewEndPosition.toTSPoint(),
 	}
-}
-
-func (i *InputEdit) FromTSInputEdit(edit *C.TSInputEdit) {
-	i.StartByte = uint(edit.start_byte)
-	i.OldEndByte = uint(edit.old_end_byte)
-	i.NewEndByte = uint(edit.new_end_byte)
-	i.StartPosition.fromTSPoint(edit.start_point)
-	i.OldEndPosition.fromTSPoint(edit.old_end_point)
-	i.NewEndPosition.fromTSPoint(edit.new_end_point)
 }
