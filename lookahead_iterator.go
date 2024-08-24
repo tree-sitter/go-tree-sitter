@@ -55,12 +55,8 @@ func (l *LookaheadIterator) ResetState(state uint16) bool {
 // Iterate symbols.
 func (l *LookaheadIterator) Iter() []uint16 {
 	var symbols []uint16
-	for {
-		if bool(C.ts_lookahead_iterator_next(l._inner)) {
-			symbols = append(symbols, l.Symbol())
-		} else {
-			break
-		}
+	for C.ts_lookahead_iterator_next(l._inner) {
+		symbols = append(symbols, l.Symbol())
 	}
 	return symbols
 }
@@ -68,12 +64,8 @@ func (l *LookaheadIterator) Iter() []uint16 {
 // Iterate symbol names.
 func (l *LookaheadIterator) IterNames() []string {
 	var names []string
-	for {
-		if bool(C.ts_lookahead_iterator_next(l._inner)) {
-			names = append(names, l.SymbolName())
-		} else {
-			break
-		}
+	for C.ts_lookahead_iterator_next(l._inner) {
+		names = append(names, l.SymbolName())
 	}
 	return names
 }

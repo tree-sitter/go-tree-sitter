@@ -2208,11 +2208,7 @@ func TestQueryMatchesWithWildcardAtRootIntersectingByteRange(t *testing.T) {
 	offset := uint(strings.Index(source, "A:")) + 2
 	matches := cursor.SetByteRange(offset, offset).Matches(query, tree.RootNode(), []byte(source))
 	kinds := make([]string, 0)
-	for {
-		match := matches.Next()
-		if match == nil {
-			break
-		}
+	for match := matches.Next(); match != nil; match = matches.Next() {
 		kinds = append(kinds, match.Captures[0].Node.Kind())
 	}
 	assert.Equal(t, []string{"class_definition"}, kinds)
@@ -2221,11 +2217,7 @@ func TestQueryMatchesWithWildcardAtRootIntersectingByteRange(t *testing.T) {
 	offset = uint(strings.Index(source, "b():")) + 4
 	matches = cursor.SetByteRange(offset, offset).Matches(query, tree.RootNode(), []byte(source))
 	kinds = make([]string, 0)
-	for {
-		match := matches.Next()
-		if match == nil {
-			break
-		}
+	for match := matches.Next(); match != nil; match = matches.Next() {
 		kinds = append(kinds, match.Captures[0].Node.Kind())
 	}
 	assert.Equal(t, []string{"class_definition", "function_definition"}, kinds)
@@ -2234,11 +2226,7 @@ func TestQueryMatchesWithWildcardAtRootIntersectingByteRange(t *testing.T) {
 	offset = uint(strings.Index(source, "c:")) + 2
 	matches = cursor.SetByteRange(offset, offset).Matches(query, tree.RootNode(), []byte(source))
 	kinds = make([]string, 0)
-	for {
-		match := matches.Next()
-		if match == nil {
-			break
-		}
+	for match := matches.Next(); match != nil; match = matches.Next() {
 		kinds = append(kinds, match.Captures[0].Node.Kind())
 	}
 	assert.Equal(t, []string{"class_definition", "function_definition", "if_statement"}, kinds)
@@ -2320,11 +2308,7 @@ func TestQueryCapturesWithinByteRangeAssignedAfterIterating(t *testing.T) {
 	// intersect the range.
 	results = make([]formattedCapture, 0)
 	captures.SetByteRange(uint(strings.Index(source, "Ok")), uint(len(source)))
-	for {
-		match, captureIndex := captures.Next()
-		if match == nil {
-			break
-		}
+	for match, captureIndex := captures.Next(); match != nil; match, captureIndex = captures.Next() {
 		capture := match.Captures[captureIndex]
 		results = append(results, fmtCapture(query.CaptureNames()[capture.Index], source[capture.Node.StartByte():capture.Node.EndByte()]))
 	}
@@ -2589,12 +2573,7 @@ func TestQueryMatchesWithCapturedWildcardAtRoot(t *testing.T) {
 	matchCaptureNamesAndRows := make([][]captureNamesAndRows, 0)
 
 	matches := cursor.Matches(query, tree.RootNode(), []byte(source))
-	for {
-		match := matches.Next()
-		if match == nil {
-			break
-		}
-
+	for match := matches.Next(); match != nil; match = matches.Next() {
 		captures := make([]captureNamesAndRows, 0)
 		for _, capture := range match.Captures {
 			captures = append(captures, captureNamesAndRows{
@@ -3489,11 +3468,7 @@ func TestQueryCapturesWithMatchesRemoved(t *testing.T) {
 
 	capturedStrings := make([]string, 0)
 	captures := cursor.Captures(query, tree.RootNode(), []byte(source))
-	for {
-		match, index := captures.Next()
-		if match == nil {
-			break
-		}
+	for match, index := captures.Next(); match != nil; match, index = captures.Next() {
 		capture := match.Captures[index]
 		text := capture.Node.Utf8Text([]byte(source))
 		if text == "a" {
@@ -3536,11 +3511,7 @@ func TestQueryCapturesWithMatchesRemovedBeforeTheyFinish(t *testing.T) {
 
 	capturedStrings := make([]string, 0)
 	captures := cursor.Captures(query, tree.RootNode(), []byte(source))
-	for {
-		match, index := captures.Next()
-		if match == nil {
-			break
-		}
+	for match, index := captures.Next(); match != nil; match, index = captures.Next() {
 		capture := match.Captures[index]
 		text := capture.Node.Utf8Text([]byte(source))
 		if text == "as" {
@@ -4539,11 +4510,7 @@ func TestConsecutiveZeroOrModifiers(t *testing.T) {
 		len3 := false
 		len1 := false
 
-		for {
-			match := matches.Next()
-			if match == nil {
-				break
-			}
+		for match := matches.Next(); match != nil; match = matches.Next() {
 			if len(match.Captures) == 3 {
 				len3 = true
 			}
@@ -4725,11 +4692,7 @@ func collectMatches(
 ) []formattedMatch {
 	result := make([]formattedMatch, 0)
 
-	for {
-		match := matches.Next()
-		if match == nil {
-			break
-		}
+	for match := matches.Next(); match != nil; match = matches.Next() {
 		result = append(result, fmtMatch(match.PatternIndex, formatCaptures(match.Captures, query, source)...))
 	}
 
@@ -4743,11 +4706,7 @@ func collectCaptures(
 ) []formattedCapture {
 	result := make([]QueryCapture, 0)
 
-	for {
-		match, index := captures.Next()
-		if match == nil {
-			break
-		}
+	for match, index := captures.Next(); match != nil; match, index = captures.Next() {
 		result = append(result, match.Captures[index])
 	}
 
