@@ -14,8 +14,6 @@ import (
 	"regexp"
 	"strings"
 	"unsafe"
-
-	"github.com/stretchr/testify/assert"
 )
 
 type Query struct {
@@ -709,8 +707,13 @@ func (qc *QueryCursor) Matches(query *Query, node *Node, text []byte) QueryMatch
 		buffer1: []byte{},
 		buffer2: []byte{},
 	}
-	assert.Equal(nil, qm._inner, qc._inner)
-	assert.Equal(nil, qm.query, query)
+	if qm._inner != qc._inner {
+		panic("inner pointers of `QueryCursor` and `QueryMatches` are not equal")
+	}
+	if qm.query != query {
+		panic("query pointers of `QueryCursor` and `QueryMatches` are not equal")
+	}
+
 	return qm
 }
 
