@@ -7,7 +7,110 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	. "github.com/tree-sitter/go-tree-sitter"
+	tree_sitter_go "github.com/tree-sitter/tree-sitter-go/bindings/go"
 )
+
+func ExampleQueryCursor_Captures() {
+	language := NewLanguage(tree_sitter_go.Language())
+	parser := NewParser()
+	defer parser.Close()
+	parser.SetLanguage(language)
+
+	sourceCode := []byte(`
+		package main
+
+		import "fmt"
+
+		func main() { fmt.Println("Hello, world!") }
+	`)
+
+	tree := parser.Parse(sourceCode, nil)
+	defer tree.Close()
+
+	query, err := NewQuery(
+		language,
+		`
+		(function_declaration
+			name: (identifier) @function.name
+			body: (block) @function.block
+		)
+		`,
+	)
+	if err != nil {
+		panic(err)
+	}
+	defer query.Close()
+
+	qc := NewQueryCursor()
+	defer qc.Close()
+
+	captures := qc.Captures(query, tree.RootNode(), sourceCode)
+
+	for match, index := captures.Next(); match != nil; match, index = captures.Next() {
+		fmt.Printf(
+			"Capture %d: %s\n",
+			index,
+			match.Captures[index].Node.Utf8Text(sourceCode),
+		)
+	}
+
+	// Output:
+	// Capture 0: main
+	// Capture 1: { fmt.Println("Hello, world!") }
+}
+
+func ExampleQueryCursor_Matches() {
+	language := NewLanguage(tree_sitter_go.Language())
+	parser := NewParser()
+	defer parser.Close()
+	parser.SetLanguage(language)
+
+	sourceCode := []byte(`
+		package main
+
+		import "fmt"
+
+		func main() { fmt.Println("Hello, world!") }
+	`)
+
+	tree := parser.Parse(sourceCode, nil)
+	defer tree.Close()
+
+	query, err := NewQuery(
+		language,
+		`
+		(function_declaration
+			name: (identifier) @function.name
+			body: (block) @function.block
+		)
+		`,
+	)
+	if err != nil {
+		panic(err)
+	}
+	defer query.Close()
+
+	qc := NewQueryCursor()
+	defer qc.Close()
+
+	matches := qc.Matches(query, tree.RootNode(), sourceCode)
+
+	for match := matches.Next(); match != nil; match = matches.Next() {
+		for _, capture := range match.Captures {
+			fmt.Printf(
+				"Match %d, Capture %d (%s): %s\n",
+				match.PatternIndex,
+				capture.Index,
+				query.CaptureNames()[capture.Index],
+				capture.Node.Utf8Text(sourceCode),
+			)
+		}
+	}
+
+	// Output:
+	// Match 0, Capture 0 (function.name): main
+	// Match 0, Capture 1 (function.block): { fmt.Println("Hello, world!") }
+}
 
 func TestQueryErrorsOnInvalidSyntax(t *testing.T) {
 	language := getLanguage("javascript")

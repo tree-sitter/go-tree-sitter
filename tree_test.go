@@ -1,12 +1,70 @@
 package tree_sitter_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	. "github.com/tree-sitter/go-tree-sitter"
+	tree_sitter_go "github.com/tree-sitter/tree-sitter-go/bindings/go"
 )
+
+func ExampleTree() {
+	parser := NewParser()
+	defer parser.Close()
+
+	language := NewLanguage(tree_sitter_go.Language())
+
+	parser.SetLanguage(language)
+
+	source := []byte(`
+			package main
+
+
+			func main() {
+				return
+			}
+	`)
+
+	tree := parser.Parse(source, nil)
+	defer tree.Close()
+
+	// We change the return statement to `return 1`
+
+	newSource := append([]byte(nil), source[:46]...)
+	newSource = append(newSource, []byte(" 1")...)
+	newSource = append(newSource, source[46:]...)
+
+	edit := &InputEdit{
+		StartByte:      46,
+		OldEndByte:     46,
+		NewEndByte:     46 + 2,
+		StartPosition:  Point{Row: 5, Column: 9},
+		OldEndPosition: Point{Row: 5, Column: 9},
+		NewEndPosition: Point{Row: 5, Column: 9 + 2},
+	}
+
+	tree.Edit(edit)
+
+	newTree := parser.Parse(newSource, tree)
+	defer newTree.Close()
+
+	for _, changedRange := range tree.ChangedRanges(newTree) {
+		fmt.Println("Changed range:")
+		fmt.Printf(" Start point: %v\n", changedRange.StartPoint)
+		fmt.Printf(" End point: %v\n", changedRange.EndPoint)
+		fmt.Printf(" Start byte: %d\n", changedRange.StartByte)
+		fmt.Printf(" End byte: %d\n", changedRange.EndByte)
+	}
+
+	// Output:
+	// Changed range:
+	//  Start point: {5 10}
+	//  End point: {5 12}
+	//  Start byte: 46
+	//  End byte: 48
+}
 
 func TestTreeEdit(t *testing.T) {
 	parser := NewParser()
@@ -693,6 +751,7 @@ func getChangedRanges(parser *Parser, tree *Tree, sourceCode *[]byte, edit *test
 	performEdit(tree, sourceCode, edit)
 	newTree := parser.Parse(*sourceCode, tree)
 	result := tree.ChangedRanges(newTree)
+	tree.Close()
 	*tree = *newTree
 	return result
 }

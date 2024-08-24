@@ -2,6 +2,7 @@ package tree_sitter_test
 
 import (
 	"bufio"
+	"fmt"
 	"math"
 	"os"
 	"runtime"
@@ -57,6 +58,62 @@ func getLanguage(name string) *Language {
 	default:
 		return nil
 	}
+}
+
+func ExampleParser_Parse() {
+	parser := NewParser()
+	defer parser.Close()
+
+	language := NewLanguage(tree_sitter_go.Language())
+
+	parser.SetLanguage(language)
+
+	tree := parser.Parse(
+		[]byte(`
+			package main
+
+
+			func main() {
+				return
+			}
+		`),
+		nil,
+	)
+	defer tree.Close()
+
+	rootNode := tree.RootNode()
+	fmt.Println(rootNode.ToSexp())
+	// Output:
+	// (source_file (package_clause (package_identifier)) (function_declaration name: (identifier) parameters: (parameter_list) body: (block (return_statement))))
+}
+
+func ExampleParser_ParseWith() {
+	parser := NewParser()
+	defer parser.Close()
+
+	language := NewLanguage(tree_sitter_go.Language())
+
+	parser.SetLanguage(language)
+
+	sourceCode := []byte(`
+			package main
+
+			func main() {
+				return
+			}
+	`)
+
+	readCallback := func(offset int, position Point) []byte {
+		return sourceCode[offset:]
+	}
+
+	tree := parser.ParseWith(readCallback, nil)
+	defer tree.Close()
+
+	rootNode := tree.RootNode()
+	fmt.Println(rootNode.ToSexp())
+	// Output:
+	// (source_file (package_clause (package_identifier)) (function_declaration name: (identifier) parameters: (parameter_list) body: (block (return_statement))))
 }
 
 func TestParsingSimpleString(t *testing.T) {

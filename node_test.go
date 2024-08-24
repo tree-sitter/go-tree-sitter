@@ -1,12 +1,14 @@
 package tree_sitter_test
 
 import (
+	"fmt"
 	"math/rand"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	. "github.com/tree-sitter/go-tree-sitter"
+	tree_sitter_go "github.com/tree-sitter/tree-sitter-go/bindings/go"
 )
 
 const JSON_EXAMPLE = `
@@ -19,6 +21,50 @@ const JSON_EXAMPLE = `
   }
 ]
 `
+
+func ExampleNode() {
+	parser := NewParser()
+	defer parser.Close()
+
+	language := NewLanguage(tree_sitter_go.Language())
+
+	parser.SetLanguage(language)
+
+	tree := parser.Parse(
+		[]byte(`
+			package main
+
+
+			func main() {
+				return
+			}
+		`),
+		nil,
+	)
+	defer tree.Close()
+
+	rootNode := tree.RootNode()
+	fmt.Println(rootNode.Kind())
+	fmt.Println(rootNode.StartPosition())
+	fmt.Println(rootNode.EndPosition())
+
+	functionNode := rootNode.Child(2)
+	fmt.Println(functionNode.Kind())
+	fmt.Println(functionNode.ChildByFieldName("name").Kind())
+
+	functionNameNode := functionNode.Child(1)
+	fmt.Println(functionNameNode.StartPosition())
+	fmt.Println(functionNameNode.EndPosition())
+
+	// Output:
+	// source_file
+	// {1 3}
+	// {7 2}
+	// function_declaration
+	// identifier
+	// {4 8}
+	// {4 12}
+}
 
 func TestNodeChild(t *testing.T) {
 	tree := parseJsonExample()
