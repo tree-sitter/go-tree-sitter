@@ -1,7 +1,7 @@
 package tree_sitter
 
 /*
-#cgo CFLAGS: -I${SRCDIR}/tree-sitter/lib/include -I${SRCDIR}/tree-sitter/lib/src
+#cgo CFLAGS: -Iinclude -Isrc -std=c11
 #include <tree_sitter/api.h>
 */
 import "C"
