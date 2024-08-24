@@ -194,7 +194,7 @@ func (p *Parser) ParseUTF16(text []uint16, oldTree *Tree) *Tree {
 	}, oldTree)
 }
 
-type Payload[T any] struct {
+type payload[T any] struct {
 	callback func(int, Point) []T
 	text     []T
 	cStrings []*C.char
@@ -204,7 +204,7 @@ type Payload[T any] struct {
 //
 //export readUTF8
 func readUTF8(_payload unsafe.Pointer, byteIndex C.uint32_t, position C.TSPoint, bytesRead *C.uint32_t) *C.char {
-	payload := pointer.Restore(_payload).(*Payload[byte])
+	payload := pointer.Restore(_payload).(*payload[byte])
 	payload.text = payload.callback(int(byteIndex), Point{uint(position.row), uint(position.column)})
 	*bytesRead = C.uint32_t(len(payload.text))
 	strbytes := C.CString(string(payload.text))
@@ -223,7 +223,7 @@ func readUTF8(_payload unsafe.Pointer, byteIndex C.uint32_t, position C.TSPoint,
 //     document has changed since `old_tree` was created, then you must edit `old_tree` to match
 //     the new text using [Tree.Edit].
 func (p *Parser) ParseWith(callback func(int, Point) []byte, oldTree *Tree) *Tree {
-	payload := Payload[byte]{
+	payload := payload[byte]{
 		callback: callback,
 		text:     nil,
 		cStrings: make([]*C.char, 0),
@@ -258,7 +258,7 @@ func (p *Parser) ParseWith(callback func(int, Point) []byte, oldTree *Tree) *Tre
 	return nil
 }
 
-func CStringUTF16(s []uint16) *C.char {
+func cStringUTF16(s []uint16) *C.char {
 	if len(s)+1 <= 0 {
 		panic("string too large")
 	}
@@ -278,10 +278,10 @@ func CStringUTF16(s []uint16) *C.char {
 //
 //export readUTF16
 func readUTF16(_payload unsafe.Pointer, byteOffset uint32, position C.TSPoint, bytesRead *uint32) *C.char {
-	payload := pointer.Restore(_payload).(*Payload[uint16])
+	payload := pointer.Restore(_payload).(*payload[uint16])
 	payload.text = payload.callback(int(byteOffset/2), Point{uint(position.row), uint(position.column / 2)})
 	*bytesRead = uint32(len(payload.text) * 2)
-	strbytes := CStringUTF16(payload.text)
+	strbytes := cStringUTF16(payload.text)
 	payload.cStrings = append(payload.cStrings, strbytes)
 	return strbytes
 }
@@ -297,7 +297,7 @@ func readUTF16(_payload unsafe.Pointer, byteOffset uint32, position C.TSPoint, b
 //     document has changed since `old_tree` was created, then you must edit `old_tree` to match
 //     the new text using [Tree.Edit].
 func (p *Parser) ParseUTF16With(callback func(int, Point) []uint16, oldTree *Tree) *Tree {
-	payload := Payload[uint16]{
+	payload := payload[uint16]{
 		callback: callback,
 		text:     nil,
 		cStrings: make([]*C.char, 0),
