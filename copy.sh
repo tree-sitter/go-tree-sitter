@@ -7,5 +7,5 @@ if [ ! -d "$SRC_DIR/src" ] || [ ! -d "$SRC_DIR/include" ]; then
 	exit 1
 fi
 
-cp -r "$SRC_DIR/src" "src"
-cp -r "$SRC_DIR/include" "include"
+cp -r "$SRC_DIR/src/" "."
+cp -r "$SRC_DIR/include/" "."
