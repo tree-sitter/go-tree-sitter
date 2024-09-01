@@ -307,6 +307,16 @@ func (n *Node) PrevNamedSibling() *Node {
 	return newNode(C.ts_node_prev_named_sibling(n._inner))
 }
 
+// Get the node's first child that extends beyond the given byte offset.
+func (n *Node) FirstChildForByte(byteOffset uint) *Node {
+	return newNode(C.ts_node_first_child_for_byte(n._inner, C.uint(byteOffset)))
+}
+
+// Get the node's first named child that extends beyond the given byte offset.
+func (n *Node) FirstNamedChildForByte(byteOffset uint) *Node {
+	return newNode(C.ts_node_first_named_child_for_byte(n._inner, C.uint(byteOffset)))
+}
+
 // Get the node's number of descendants, including one for the node itself.
 func (n *Node) DescendantCount() uint {
 	return uint(C.ts_node_descendant_count(n._inner))
