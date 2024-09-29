@@ -1,7 +1,7 @@
 package tree_sitter
 
 /*
-#cgo CFLAGS: -Iinclude -Isrc -std=c11
+#cgo CFLAGS: -Iinclude -Isrc -std=c11 -D_POSIX_C_SOURCE=200112L
 #include <tree_sitter/api.h>
 #include <stdio.h>
 
