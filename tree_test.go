@@ -528,12 +528,13 @@ func TestTreeCursorChildForPoint(t *testing.T) {
 	assert.Equal(t, c.Node().Kind(), "program")
 
 	// descend to expression statement
-	assert.EqualValues(t, *c.GotoFirstChildForPoint(Point{Row: 6, Column: 6}), 0)
+	assert.EqualValues(t, *c.GotoFirstChildForPoint(Point{Row: 6, Column: 5}), 0)
 	assert.Equal(t, c.Node().Kind(), "expression_statement")
 
 	// step into ';' and back up
 	assert.Nil(t, c.GotoFirstChildForPoint(Point{Row: 7, Column: 0}))
-	assert.EqualValues(t, *c.GotoFirstChildForPoint(Point{Row: 6, Column: 6}), 1)
+	assert.Nil(t, c.GotoFirstChildForPoint(Point{Row: 6, Column: 6}))
+	assert.EqualValues(t, *c.GotoFirstChildForPoint(Point{Row: 6, Column: 5}), 1)
 	assert.Equal(t, c.Node().Kind(), ";")
 	assert.Equal(t, c.Node().StartPosition(), Point{Row: 6, Column: 5})
 	assert.True(t, c.GotoParent())
@@ -560,7 +561,7 @@ func TestTreeCursorChildForPoint(t *testing.T) {
 	assert.True(t, c.GotoParent())
 
 	// step into first ',' and back up
-	assert.EqualValues(t, *c.GotoFirstChildForPoint(Point{Row: 1, Column: 12}), 2)
+	assert.EqualValues(t, *c.GotoFirstChildForPoint(Point{Row: 1, Column: 11}), 2)
 	assert.Equal(t, c.Node().Kind(), ",")
 	assert.Equal(t, c.Node().StartPosition(), Point{Row: 1, Column: 11})
 	assert.True(t, c.GotoParent())

@@ -2,6 +2,7 @@ package tree_sitter_test
 
 import (
 	"bufio"
+	"encoding/binary"
 	"fmt"
 	"math"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 	"unicode/utf16"
+	"unsafe"
 
 	"github.com/stretchr/testify/assert"
 	. "github.com/tree-sitter/go-tree-sitter"
@@ -233,7 +235,7 @@ func TestParsingWithCustomUTF8Input(t *testing.T) {
 	assert.Equal(t, root.Child(0).Kind(), "function_item")
 }
 
-func TestParsingWithCustomUTF16Input(t *testing.T) {
+func TestParsingWithCustomUTF16LEInput(t *testing.T) {
 	parser := NewParser()
 	defer parser.Close()
 	parser.SetLanguage(getLanguage("rust"))
@@ -244,14 +246,61 @@ func TestParsingWithCustomUTF16Input(t *testing.T) {
 		utf16.Encode([]rune("}")),
 	}
 
-	tree := parser.ParseUTF16With(func(_ int, position Point) []uint16 {
+	newline := []uint16{binary.LittleEndian.Uint16([]byte{'\n', 0})}
+
+	tree := parser.ParseUTF16LEWith(func(_ int, position Point) []uint16 {
 		row := position.Row
 		column := position.Column
 		if row < uint(len(lines)) {
 			if column < uint(len(lines[row])) {
 				return lines[row][column:]
 			} else {
-				return []uint16{10}
+				return newline
+			}
+		} else {
+			return []uint16{}
+		}
+	}, nil)
+
+	root := tree.RootNode()
+	assert.Equal(t, root.ToSexp(), "(source_file (function_item (visibility_modifier) name: (identifier) parameters: (parameters) body: (block (integer_literal))))")
+	assert.Equal(t, root.Kind(), "source_file")
+	assert.False(t, root.HasError())
+	assert.Equal(t, root.Child(0).Kind(), "function_item")
+}
+
+func TestParsingWithCustomUTF16BEInput(t *testing.T) {
+	parser := NewParser()
+	defer parser.Close()
+	parser.SetLanguage(getLanguage("rust"))
+
+	lines := [][]uint16{
+		utf16.Encode([]rune("pub fn foo() {")),
+		utf16.Encode([]rune("  1")),
+		utf16.Encode([]rune("}")),
+	}
+
+	i := 1
+	bigEndian := (*[int(unsafe.Sizeof(0))]byte)(unsafe.Pointer(&i))[0] == 0
+
+	if !bigEndian {
+		for _, line := range lines {
+			for i := 0; i < len(line); i++ {
+				line[i] = line[i]<<8 | line[i]>>8
+			}
+		}
+	}
+
+	newline := []uint16{binary.BigEndian.Uint16([]byte{'\n', 0})}
+
+	tree := parser.ParseUTF16BEWith(func(_ int, position Point) []uint16 {
+		row := position.Row
+		column := position.Column
+		if row < uint(len(lines)) {
+			if column < uint(len(lines[row])) {
+				return lines[row][column:]
+			} else {
+				return newline
 			}
 		} else {
 			return []uint16{}
@@ -286,7 +335,7 @@ func TestParsingTextWithByteOrderMark(t *testing.T) {
 	parser.SetLanguage(getLanguage("rust"))
 
 	// Parse UTF16 text with a BOM
-	tree := parser.ParseUTF16([]uint16{0xFEFF, 'f', 'n', ' ', 'a', '(', ')', ' ', '{', '}'}, nil)
+	tree := parser.ParseUTF16LE([]uint16{0xFEFF, 'f', 'n', ' ', 'a', '(', ')', ' ', '{', '}'}, nil)
 	assert.Equal(t, tree.RootNode().ToSexp(), "(source_file (function_item name: (identifier) parameters: (parameters) body: (block)))")
 	assert.Equal(t, tree.RootNode().StartByte(), uint(2))
 
@@ -888,7 +937,7 @@ func TestParsingUTF16CodeWithErrorsAtEndOfIncludedRange(t *testing.T) {
 		},
 	})
 
-	tree := parser.ParseUTF16(utf16SourceCode, nil)
+	tree := parser.ParseUTF16LE(utf16SourceCode, nil)
 	assert.Equal(t, "(program (ERROR (identifier)))", tree.RootNode().ToSexp())
 }
 

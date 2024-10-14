@@ -1,7 +1,4 @@
-#define _POSIX_C_SOURCE 200112L
-
 #include <time.h>
-#include <assert.h>
 #include <stdio.h>
 #include <limits.h>
 #include <stdbool.h>
@@ -21,6 +18,7 @@
 #include "./stack.h"
 #include "./subtree.h"
 #include "./tree.h"
+#include "./ts_assert.h"
 #include "./wasm_store.h"
 
 #define LOG(...)                                                                            \
@@ -350,7 +348,7 @@ static bool ts_parser__call_main_lex_fn(TSParser *self, TSLexMode lex_mode) {
   }
 }
 
-static bool ts_parser__call_keyword_lex_fn(TSParser *self, TSLexMode lex_mode) {
+static bool ts_parser__call_keyword_lex_fn(TSParser *self) {
   if (ts_language_is_wasm(self->language)) {
     return ts_wasm_store_call_lex_keyword(self->wasm_store, 0);
   } else {
@@ -405,7 +403,7 @@ static unsigned ts_parser__external_scanner_serialize(
       self->external_scanner_payload,
       self->lexer.debug_buffer
     );
-    assert(length <= TREE_SITTER_SERIALIZATION_BUFFER_SIZE);
+    ts_assert(length <= TREE_SITTER_SERIALIZATION_BUFFER_SIZE);
     return length;
   }
 }
@@ -651,7 +649,7 @@ static Subtree ts_parser__lex(
       ts_lexer_reset(&self->lexer, self->lexer.token_start_position);
       ts_lexer_start(&self->lexer);
 
-      is_keyword = ts_parser__call_keyword_lex_fn(self, lex_mode);
+      is_keyword = ts_parser__call_keyword_lex_fn(self);
 
       if (
         is_keyword &&
@@ -1041,7 +1039,7 @@ static void ts_parser__accept(
   StackVersion version,
   Subtree lookahead
 ) {
-  assert(ts_subtree_is_eof(lookahead));
+  ts_assert(ts_subtree_is_eof(lookahead));
   ts_stack_push(self->stack, version, lookahead, false, 1);
 
   StackSliceArray pop = ts_stack_pop_all(self->stack, version);
@@ -1052,7 +1050,7 @@ static void ts_parser__accept(
     for (uint32_t j = trees.size - 1; j + 1 > 0; j--) {
       Subtree tree = trees.contents[j];
       if (!ts_subtree_extra(tree)) {
-        assert(!tree.data.is_inline);
+        ts_assert(!tree.data.is_inline);
         uint32_t child_count = ts_subtree_child_count(tree);
         const Subtree *children = ts_subtree_children(tree);
         for (uint32_t k = 0; k < child_count; k++) {
@@ -1070,7 +1068,7 @@ static void ts_parser__accept(
       }
     }
 
-    assert(root.ptr);
+    ts_assert(root.ptr);
     self->accept_count++;
 
     if (self->finished_tree.ptr) {
@@ -1206,7 +1204,7 @@ static bool ts_parser__recover_to_state(
 
     SubtreeArray error_trees = ts_stack_pop_error(self->stack, slice.version);
     if (error_trees.size > 0) {
-      assert(error_trees.size == 1);
+      ts_assert(error_trees.size == 1);
       Subtree error_tree = error_trees.contents[0];
       uint32_t error_child_count = ts_subtree_child_count(error_tree);
       if (error_child_count > 0) {
@@ -1494,8 +1492,7 @@ static void ts_parser__handle_error(
 
   for (unsigned i = previous_version_count; i < version_count; i++) {
     bool did_merge = ts_stack_merge(self->stack, version, previous_version_count);
-    assert(did_merge);
-    (void)did_merge;	//	fix warning/error with clang -Os
+    ts_assert(did_merge);
   }
 
   ts_stack_record_summary(self->stack, version, MAX_SUMMARY_DEPTH);
@@ -2101,7 +2098,7 @@ TSTree *ts_parser_parse(
     }
   } while (version_count != 0);
 
-  assert(self->finished_tree.ptr);
+  ts_assert(self->finished_tree.ptr);
   ts_subtree_balance(self->finished_tree, &self->tree_pool, self->language);
   LOG("done");
   LOG_TREE(self->finished_tree);

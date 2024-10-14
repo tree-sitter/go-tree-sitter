@@ -1,13 +1,14 @@
 package tree_sitter
 
 /*
-#cgo CFLAGS: -Iinclude -Isrc -std=c11 -D_POSIX_C_SOURCE=200112L
+#cgo CFLAGS: -Iinclude -Isrc -std=c11 -D_POSIX_C_SOURCE=200112L -D_DEFAULT_SOURCE
 #include <tree_sitter/api.h>
 #include <stdio.h>
 
 extern void logCallback(void *payload, TSLogType log_type, char *message);
 extern char *readUTF8(void *payload, uint32_t byte_index, TSPoint position, uint32_t *bytes_read);
-extern char *readUTF16(void *payload, uint32_t byte_offset, TSPoint position, uint32_t *bytes_read);
+extern char *readUTF16LE(void *payload, uint32_t byte_offset, TSPoint position, uint32_t *bytes_read);
+extern char *readUTF16BE(void *payload, uint32_t byte_offset, TSPoint position, uint32_t *bytes_read);
 */
 import "C"
 
@@ -177,6 +178,7 @@ func (p *Parser) ParseCtx(ctx context.Context, text []byte, oldTree *Tree) *Tree
 	return tree
 }
 
+// Deprecated: Use [Parser.ParseUTF16LE] or [Parser.ParseUTF16BE] instead.
 // Parse a slice of UTF16 text.
 //
 // # Arguments:
@@ -187,6 +189,40 @@ func (p *Parser) ParseCtx(ctx context.Context, text []byte, oldTree *Tree) *Tree
 func (p *Parser) ParseUTF16(text []uint16, oldTree *Tree) *Tree {
 	length := len(text)
 	return p.ParseUTF16With(func(i int, _ Point) []uint16 {
+		if i < length {
+			return text[i:]
+		}
+		return []uint16{}
+	}, oldTree)
+}
+
+// / Parse a slice of UTF16 little-endian text.
+// /
+// / # Arguments:
+// / * `text` The UTF16-encoded text to parse.
+// / * `old_tree` A previous syntax tree parsed from the same document. If the text of the
+// /   document has changed since `old_tree` was created, then you must edit `old_tree` to match
+// /   the new text using [Tree.Edit].
+func (p *Parser) ParseUTF16LE(text []uint16, oldTree *Tree) *Tree {
+	length := len(text)
+	return p.ParseUTF16LEWith(func(i int, _ Point) []uint16 {
+		if i < length {
+			return text[i:]
+		}
+		return []uint16{}
+	}, oldTree)
+}
+
+// / Parse a slice of UTF16 big-endian text.
+// /
+// / # Arguments:
+// / * `text` The UTF16-encoded text to parse.
+// / * `old_tree` A previous syntax tree parsed from the same document. If the text of the
+// /   document has changed since `old_tree` was created, then you must edit `old_tree` to match
+// /   the new text using [Tree.Edit].
+func (p *Parser) ParseUTF16BE(text []uint16, oldTree *Tree) *Tree {
+	length := len(text)
+	return p.ParseUTF16BEWith(func(i int, _ Point) []uint16 {
 		if i < length {
 			return text[i:]
 		}
@@ -276,8 +312,8 @@ func cStringUTF16(s []uint16) *C.char {
 
 // This C function is passed to Tree-sitter as the input callback.
 //
-//export readUTF16
-func readUTF16(_payload unsafe.Pointer, byteOffset uint32, position C.TSPoint, bytesRead *uint32) *C.char {
+//export readUTF16LE
+func readUTF16LE(_payload unsafe.Pointer, byteOffset uint32, position C.TSPoint, bytesRead *uint32) *C.char {
 	payload := pointer.Restore(_payload).(*payload[uint16])
 	payload.text = payload.callback(int(byteOffset/2), Point{uint(position.row), uint(position.column / 2)})
 	*bytesRead = uint32(len(payload.text) * 2)
@@ -286,6 +322,19 @@ func readUTF16(_payload unsafe.Pointer, byteOffset uint32, position C.TSPoint, b
 	return strbytes
 }
 
+// This C function is passed to Tree-sitter as the input callback.
+//
+//export readUTF16BE
+func readUTF16BE(_payload unsafe.Pointer, byteOffset uint32, position C.TSPoint, bytesRead *uint32) *C.char {
+	payload := pointer.Restore(_payload).(*payload[uint16])
+	payload.text = payload.callback(int(byteOffset/2), Point{uint(position.row), uint(position.column / 2)})
+	*bytesRead = uint32(len(payload.text) * 2)
+	strbytes := cStringUTF16(payload.text)
+	payload.cStrings = append(payload.cStrings, strbytes)
+	return strbytes
+}
+
+// Deprecated: Use [Parser.ParseUTF16LEWith] or [Parser.ParseUTF16BEWith] instead.
 // Parse UTF16 text provided in chunks by a callback.
 //
 // # Arguments:
@@ -297,6 +346,20 @@ func readUTF16(_payload unsafe.Pointer, byteOffset uint32, position C.TSPoint, b
 //     document has changed since `old_tree` was created, then you must edit `old_tree` to match
 //     the new text using [Tree.Edit].
 func (p *Parser) ParseUTF16With(callback func(int, Point) []uint16, oldTree *Tree) *Tree {
+	return p.ParseUTF16LEWith(callback, oldTree)
+}
+
+// Parse UTF16 little-endian text provided in chunks by a callback.
+//
+// # Arguments:
+//   - `callback` A function that takes a code point offset and position and returns a slice of
+//     UTF16-encoded text starting at that byte offset and position. The slices can be of any
+//     length. If the given position is at the end of the text, the callback should return an
+//     empty slice.
+//   - `old_tree` A previous syntax tree parsed from the same document. If the text of the
+//     document has changed since `old_tree` was created, then you must edit `old_tree` to match
+//     the new text using [Tree.Edit].
+func (p *Parser) ParseUTF16LEWith(callback func(int, Point) []uint16, oldTree *Tree) *Tree {
 	payload := payload[uint16]{
 		callback: callback,
 		text:     nil,
@@ -314,8 +377,54 @@ func (p *Parser) ParseUTF16With(callback func(int, Point) []uint16, oldTree *Tre
 
 	cInput := C.TSInput{
 		payload:  unsafe.Pointer(cptr),
-		read:     (*[0]byte)(C.readUTF16),
-		encoding: C.TSInputEncodingUTF16,
+		read:     (*[0]byte)(C.readUTF16LE),
+		encoding: C.TSInputEncodingUTF16LE,
+	}
+
+	var cOldTree *C.TSTree
+	if oldTree != nil {
+		cOldTree = oldTree._inner
+	}
+
+	cNewTree := C.ts_parser_parse(p._inner, cOldTree, cInput)
+
+	if cNewTree != nil {
+		return newTree(cNewTree)
+	}
+
+	return nil
+}
+
+// Parse UTF16 big-endian text provided in chunks by a callback.
+//
+// # Arguments:
+//   - `callback` A function that takes a code point offset and position and returns a slice of
+//     UTF16-encoded text starting at that byte offset and position. The slices can be of any
+//     length. If the given position is at the end of the text, the callback should return an
+//     empty slice.
+//   - `old_tree` A previous syntax tree parsed from the same document. If the text of the
+//     document has changed since `old_tree` was created, then you must edit `old_tree` to match
+//     the new text using [Tree.Edit].
+func (p *Parser) ParseUTF16BEWith(callback func(int, Point) []uint16, oldTree *Tree) *Tree {
+	payload := payload[uint16]{
+		callback: callback,
+		text:     nil,
+		cStrings: make([]*C.char, 0),
+	}
+
+	defer func() {
+		for _, cString := range payload.cStrings {
+			go_free(unsafe.Pointer(cString))
+		}
+	}()
+
+	cptr := pointer.Save(&payload)
+	defer pointer.Unref(cptr)
+
+	cInput := C.TSInput{
+		payload:  unsafe.Pointer(cptr),
+		read:     (*[0]byte)(C.readUTF16BE),
+		encoding: C.TSInputEncodingUTF16BE,
 	}
 
 	var cOldTree *C.TSTree

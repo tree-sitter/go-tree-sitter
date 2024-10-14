@@ -1,4 +1,3 @@
-#include <assert.h>
 #include <ctype.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -11,6 +10,7 @@
 #include "./length.h"
 #include "./language.h"
 #include "./error_costs.h"
+#include "./ts_assert.h"
 #include <stddef.h>
 
 typedef struct {
@@ -229,7 +229,7 @@ void ts_subtree_set_symbol(
 ) {
   TSSymbolMetadata metadata = ts_language_symbol_metadata(language, symbol);
   if (self->data.is_inline) {
-    assert(symbol < UINT8_MAX);
+    ts_assert(symbol < UINT8_MAX);
     self->data.symbol = symbol;
     self->data.named = metadata.named;
     self->data.visible = metadata.visible;
@@ -371,7 +371,7 @@ void ts_subtree_summarize_children(
   MutableSubtree self,
   const TSLanguage *language
 ) {
-  assert(!self.data.is_inline);
+  ts_assert(!self.data.is_inline);
 
   self.ptr->named_child_count = 0;
   self.ptr->visible_child_count = 0;
@@ -583,16 +583,16 @@ Subtree ts_subtree_new_missing_leaf(
 
 void ts_subtree_retain(Subtree self) {
   if (self.data.is_inline) return;
-  assert(self.ptr->ref_count > 0);
+  ts_assert(self.ptr->ref_count > 0);
   atomic_inc((volatile uint32_t *)&self.ptr->ref_count);
-  assert(self.ptr->ref_count != 0);
+  ts_assert(self.ptr->ref_count != 0);
 }
 
 void ts_subtree_release(SubtreePool *pool, Subtree self) {
   if (self.data.is_inline) return;
   array_clear(&pool->tree_stack);
 
-  assert(self.ptr->ref_count > 0);
+  ts_assert(self.ptr->ref_count > 0);
   if (atomic_dec((volatile uint32_t *)&self.ptr->ref_count) == 0) {
     array_push(&pool->tree_stack, ts_subtree_to_mut_unsafe(self));
   }
@@ -604,7 +604,7 @@ void ts_subtree_release(SubtreePool *pool, Subtree self) {
       for (uint32_t i = 0; i < tree.ptr->child_count; i++) {
         Subtree child = children[i];
         if (child.data.is_inline) continue;
-        assert(child.ptr->ref_count > 0);
+        ts_assert(child.ptr->ref_count > 0);
         if (atomic_dec((volatile uint32_t *)&child.ptr->ref_count) == 0) {
           array_push(&pool->tree_stack, ts_subtree_to_mut_unsafe(child));
         }
@@ -677,7 +677,8 @@ Subtree ts_subtree_edit(Subtree self, const TSInputEdit *input_edit, SubtreePool
     Edit edit = entry.edit;
     bool is_noop = edit.old_end.bytes == edit.start.bytes && edit.new_end.bytes == edit.start.bytes;
     bool is_pure_insertion = edit.old_end.bytes == edit.start.bytes;
-    bool invalidate_first_row = ts_subtree_depends_on_column(*entry.tree);
+    bool parent_depends_on_column = ts_subtree_depends_on_column(*entry.tree);
+    bool column_shifted = edit.new_end.extent.column != edit.old_end.extent.column;
 
     Length size = ts_subtree_size(*entry.tree);
     Length padding = ts_subtree_padding(*entry.tree);
@@ -771,8 +772,12 @@ Subtree ts_subtree_edit(Subtree self, const TSInputEdit *input_edit, SubtreePool
         (child_left.bytes > edit.old_end.bytes) ||
         (child_left.bytes == edit.old_end.bytes && child_size.bytes > 0 && i > 0)
       ) && (
-        !invalidate_first_row ||
-        child_left.extent.row > entry.tree->ptr->padding.extent.row
+        !parent_depends_on_column ||
+        child_left.extent.row > padding.extent.row
+      ) && (
+        !ts_subtree_depends_on_column(*child) ||
+        !column_shifted ||
+        child_left.extent.row > edit.old_end.extent.row
       )) {
         break;
       }
@@ -985,6 +990,7 @@ void ts_subtree__print_dot_graph(const Subtree *self, uint32_t start_offset,
 
   if (ts_subtree_child_count(*self) == 0) fprintf(f, ", shape=plaintext");
   if (ts_subtree_extra(*self)) fprintf(f, ", fontcolor=gray");
+  if (ts_subtree_has_changes(*self)) fprintf(f, ", color=green, penwidth=2");
 
   fprintf(f, ", tooltip=\""
     "range: %u - %u\n"

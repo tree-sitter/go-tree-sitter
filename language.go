@@ -1,7 +1,7 @@
 package tree_sitter
 
 /*
-#cgo CFLAGS: -Iinclude -Isrc -std=c11 -D_POSIX_C_SOURCE=200112L
+#cgo CFLAGS: -Iinclude -Isrc -std=c11 -D_POSIX_C_SOURCE=200112L -D_DEFAULT_SOURCE
 #include <tree_sitter/api.h>
 */
 import "C"
@@ -59,8 +59,15 @@ func (l *Language) NodeKindIsNamed(id uint16) bool {
 	return C.ts_language_symbol_type(l.Inner, C.TSSymbol(id)) == C.TSSymbolTypeRegular
 }
 
+// Check if the node type for the given numerical id is visible (as opposed
+// to a hidden node type).
 func (l *Language) NodeKindIsVisible(id uint16) bool {
 	return C.ts_language_symbol_type(l.Inner, C.TSSymbol(id)) <= C.TSSymbolTypeAnonymous
+}
+
+// Check if the node type for the given numerical id is a supertype.
+func (l *Language) NodeKindIsSupertype(id uint16) bool {
+	return C.ts_language_symbol_type(l.Inner, C.TSSymbol(id)) == C.TSSymbolTypeSupertype
 }
 
 // Get the number of distinct field names in this language.
