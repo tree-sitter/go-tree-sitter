@@ -166,10 +166,11 @@ func TestNodeChild(t *testing.T) {
 	assert.Equal(t, tree.RootNode(), arrayNode.Parent())
 	assert.Nil(t, tree.RootNode().Parent())
 
-	assert.Equal(t, arrayNode, tree.RootNode().ChildContainingDescendant(nullNode))
-	assert.Equal(t, objectNode, arrayNode.ChildContainingDescendant(nullNode))
-	assert.Equal(t, pairNode, objectNode.ChildContainingDescendant(nullNode))
-	assert.Nil(t, pairNode.ChildContainingDescendant(nullNode))
+	assert.Equal(t, arrayNode, tree.RootNode().ChildWithDescendant(nullNode))
+	assert.Equal(t, objectNode, arrayNode.ChildWithDescendant(nullNode))
+	assert.Equal(t, pairNode, objectNode.ChildWithDescendant(nullNode))
+	assert.Equal(t, nullNode, pairNode.ChildWithDescendant(nullNode))
+	assert.Nil(t, nullNode.ChildWithDescendant(nullNode))
 }
 
 func TestNodeChildren(t *testing.T) {
@@ -288,6 +289,13 @@ func TestNodeFieldNameForChild(t *testing.T) {
 
 	binaryExpressionNode := declarationNode.ChildByFieldName("declarator").ChildByFieldName("value")
 
+	// -------------------
+	// left: (identifier)  0
+	// operator: "+"       1 <--- (not a named child)
+	// (comment)           2 <--- (is an extra)
+	// right: (identifier) 3
+	// -------------------
+
 	assert.Equal(t, "left", binaryExpressionNode.FieldNameForChild(0))
 	assert.Equal(t, "operator", binaryExpressionNode.FieldNameForChild(1))
 	// The comment should not have a field name, as it's just an extra
@@ -295,6 +303,34 @@ func TestNodeFieldNameForChild(t *testing.T) {
 	assert.Equal(t, "right", binaryExpressionNode.FieldNameForChild(3))
 	// Negative test - Not a valid child index
 	assert.Equal(t, "", binaryExpressionNode.FieldNameForChild(4))
+}
+
+func TestNodeFieldNameForNamedChild(t *testing.T) {
+	parser := NewParser()
+	defer parser.Close()
+	parser.SetLanguage(getLanguage("c"))
+
+	tree := parser.Parse([]byte("int w = x + /* y is special! */ y;"), nil)
+	defer tree.Close()
+	translationUnitNode := tree.RootNode()
+	declarationNode := translationUnitNode.NamedChild(0)
+
+	binaryExpressionNode := declarationNode.ChildByFieldName("declarator").ChildByFieldName("value")
+
+	// -------------------
+	// left: (identifier)  0
+	// operator: "+"       _ <--- (not a named child)
+	// (comment)           1 <--- (is an extra)
+	// right: (identifier) 2
+	// -------------------
+
+	assert.Equal(t, "left", binaryExpressionNode.FieldNameForNamedChild(0))
+	// The comment should not have a field name, as it's just an extra
+	assert.Equal(t, "", binaryExpressionNode.FieldNameForNamedChild(1))
+	// The operator is not a named child, so the named child at index 2 is the right child
+	assert.Equal(t, "right", binaryExpressionNode.FieldNameForNamedChild(2))
+	// Negative test - Not a valid child index
+	assert.Equal(t, "", binaryExpressionNode.FieldNameForNamedChild(3))
 }
 
 func TestNodeChildByFieldNameWithExtraHiddenChildren(t *testing.T) {

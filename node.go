@@ -1,7 +1,7 @@
 package tree_sitter
 
 /*
-#cgo CFLAGS: -Iinclude -Isrc -std=c11 -D_POSIX_C_SOURCE=200112L
+#cgo CFLAGS: -Iinclude -Isrc -std=c11 -D_POSIX_C_SOURCE=200112L -D_DEFAULT_SOURCE
 #include <tree_sitter/api.h>
 */
 import "C"
@@ -209,6 +209,15 @@ func (n *Node) FieldNameForChild(childIndex uint32) string {
 	return C.GoString(ptr)
 }
 
+// Get the field name of this node's named child at the given index.
+func (n *Node) FieldNameForNamedChild(namedChildIndex uint32) string {
+	ptr := C.ts_node_field_name_for_named_child(n._inner, C.uint32_t(namedChildIndex))
+	if ptr == nil {
+		return ""
+	}
+	return C.GoString(ptr)
+}
+
 // Iterate over this node's children.
 //
 // A [TreeCursor] is used to retrieve the children efficiently. Obtain
@@ -282,9 +291,19 @@ func (n *Node) Parent() *Node {
 	return newNode(C.ts_node_parent(n._inner))
 }
 
-// Get this node's child that contains descendant.
+// Deprecated: Prefer [Node.ChildWithDescendant] instead, this will be removed in 0.25
+// Get the node's child containing `descendant`. This will not return
+// the descendant if it is a direct child of `self`, for that use
+// [Node.ChildWithDescendant].
 func (n *Node) ChildContainingDescendant(descendant *Node) *Node {
 	return newNode(C.ts_node_child_containing_descendant(n._inner, descendant._inner))
+}
+
+// Get the node that contains `descendant`.
+// Note that this can return `descendant` itself, unlike the deprecated function
+// [Node.ChildContainingDescendant].
+func (n *Node) ChildWithDescendant(descendant *Node) *Node {
+	return newNode(C.ts_node_child_with_descendant(n._inner, descendant._inner))
 }
 
 // Get this node's next sibling.

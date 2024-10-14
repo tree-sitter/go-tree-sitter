@@ -50,12 +50,14 @@ typedef struct TSLookaheadIterator TSLookaheadIterator;
 
 typedef enum TSInputEncoding {
   TSInputEncodingUTF8,
-  TSInputEncodingUTF16,
+  TSInputEncodingUTF16LE,
+  TSInputEncodingUTF16BE,
 } TSInputEncoding;
 
 typedef enum TSSymbolType {
   TSSymbolTypeRegular,
   TSSymbolTypeAnonymous,
+  TSSymbolTypeSupertype,
   TSSymbolTypeAuxiliary,
 } TSSymbolType;
 
@@ -554,9 +556,21 @@ TSStateId ts_node_next_parse_state(TSNode self);
 TSNode ts_node_parent(TSNode self);
 
 /**
- * Get the node's child that contains `descendant`.
+ * @deprecated use [`ts_node_contains_descendant`] instead, this will be removed in 0.25
+ *
+ * Get the node's child containing `descendant`. This will not return
+ * the descendant if it is a direct child of `self`, for that use
+ * `ts_node_contains_descendant`.
  */
 TSNode ts_node_child_containing_descendant(TSNode self, TSNode descendant);
+
+/**
+ * Get the node that contains `descendant`.
+ *
+ * Note that this can return `descendant` itself, unlike the deprecated function
+ * [`ts_node_child_containing_descendant`].
+ */
+TSNode ts_node_child_with_descendant(TSNode self, TSNode descendant);
 
 /**
  * Get the node's child at the given index, where zero represents the first
@@ -569,6 +583,12 @@ TSNode ts_node_child(TSNode self, uint32_t child_index);
  * the first child. Returns NULL, if no field is found.
  */
 const char *ts_node_field_name_for_child(TSNode self, uint32_t child_index);
+
+/**
+ * Get the field name for node's named child at the given index, where zero
+ * represents the first named child. Returns NULL, if no field is found.
+ */
+const char *ts_node_field_name_for_named_child(TSNode self, uint32_t named_child_index);
 
 /**
  * Get the node's number of children.
