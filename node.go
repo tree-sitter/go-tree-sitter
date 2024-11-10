@@ -391,3 +391,8 @@ func (n *Node) Walk() *TreeCursor {
 func (n *Node) Edit(edit *InputEdit) {
 	C.ts_node_edit(&n._inner, edit.toTSInputEdit())
 }
+
+// Check if two nodes are identical.
+func (n *Node) Equals(other Node) bool {
+	return bool(C.ts_node_eq(n._inner, other._inner))
+}
