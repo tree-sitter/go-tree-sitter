@@ -22,14 +22,14 @@ func newTree(inner *C.TSTree) *Tree {
 }
 
 // Get the root node of the syntax tree.
-func (t *Tree) RootNode() *Node {
-	return &Node{_inner: C.ts_tree_root_node(t._inner)}
+func (t *Tree) RootNode() Node {
+	return Node{_inner: C.ts_tree_root_node(t._inner)}
 }
 
 // Get the root node of the syntax tree, but with its position shifted
 // forward by the given offset.
-func (t *Tree) RootNodeWithOffset(offsetBytes int, offsetExtent Point) *Node {
-	return &Node{_inner: C.ts_tree_root_node_with_offset(t._inner, C.uint(offsetBytes), offsetExtent.toTSPoint())}
+func (t *Tree) RootNodeWithOffset(offsetBytes int, offsetExtent Point) Node {
+	return Node{_inner: C.ts_tree_root_node_with_offset(t._inner, C.uint(offsetBytes), offsetExtent.toTSPoint())}
 }
 
 // Get the language that was used to parse the syntax tree.

@@ -88,9 +88,9 @@ func TestTreeEdit(t *testing.T) {
 			NewEndPosition: Point{Row: 0, Column: 2},
 		})
 
-		expr := tree.RootNode().Child(0).Child(0)
-		child1 := expr.Child(0)
-		child2 := expr.Child(1)
+		expr := nodeMust(nodeMust(tree.RootNode().Child(0)).Child(0))
+		child1 := nodeMust(expr.Child(0))
+		child2 := nodeMust(expr.Child(1))
 
 		assert.True(t, expr.HasChanges())
 		assert.EqualValues(t, expr.StartByte(), 3)
@@ -116,9 +116,9 @@ func TestTreeEdit(t *testing.T) {
 			NewEndPosition: Point{Row: 0, Column: 5},
 		})
 
-		expr := tree.RootNode().Child(0).Child(0)
-		child1 := expr.Child(0)
-		child2 := expr.Child(1)
+		expr := nodeMust(nodeMust(tree.RootNode().Child(0)).Child(0))
+		child1 := nodeMust(expr.Child(0))
+		child2 := nodeMust(expr.Child(1))
 
 		assert.True(t, expr.HasChanges())
 		assert.EqualValues(t, expr.StartByte(), 5)
@@ -155,9 +155,9 @@ func TestTreeEdit(t *testing.T) {
 		// assert!(!child2.has_changes());
 		// assert_eq!(child2.byte_range(), 9..12);
 
-		expr := tree.RootNode().Child(0).Child(0)
-		child1 := expr.Child(0)
-		child2 := expr.Child(1)
+		expr := nodeMust(nodeMust(tree.RootNode().Child(0)).Child(0))
+		child1 := nodeMust(expr.Child(0))
+		child2 := nodeMust(expr.Child(1))
 
 		assert.True(t, expr.HasChanges())
 		assert.EqualValues(t, expr.StartByte(), 4)
@@ -183,9 +183,9 @@ func TestTreeEdit(t *testing.T) {
 			NewEndPosition: Point{Row: 0, Column: 4},
 		})
 
-		expr := tree.RootNode().Child(0).Child(0)
-		child1 := expr.Child(0)
-		child2 := expr.Child(1)
+		expr := nodeMust(nodeMust(tree.RootNode().Child(0)).Child(0))
+		child1 := nodeMust(expr.Child(0))
+		child2 := nodeMust(expr.Child(1))
 
 		assert.True(t, expr.HasChanges())
 		assert.EqualValues(t, expr.StartByte(), 4)
@@ -211,10 +211,10 @@ func TestTreeEdit(t *testing.T) {
 			NewEndPosition: Point{Row: 0, Column: 4},
 		})
 
-		expr := tree.RootNode().Child(0).Child(0)
-		child1 := expr.Child(0)
-		child2 := expr.Child(1)
-		child3 := expr.Child(2)
+		expr := nodeMust(nodeMust(tree.RootNode().Child(0)).Child(0))
+		child1 := nodeMust(expr.Child(0))
+		child2 := nodeMust(expr.Child(1))
+		child3 := nodeMust(expr.Child(2))
 
 		assert.True(t, expr.HasChanges())
 		assert.EqualValues(t, expr.StartByte(), 4)
@@ -243,10 +243,10 @@ func TestTreeEdit(t *testing.T) {
 			NewEndPosition: Point{Row: 0, Column: 16},
 		})
 
-		expr := tree.RootNode().Child(0).Child(0)
-		child1 := expr.Child(0)
-		child2 := expr.Child(1)
-		child3 := expr.Child(2)
+		expr := nodeMust(nodeMust(tree.RootNode().Child(0)).Child(0))
+		child1 := nodeMust(expr.Child(0))
+		child2 := nodeMust(expr.Child(1))
+		child3 := nodeMust(expr.Child(2))
 
 		assert.True(t, expr.HasChanges())
 		assert.EqualValues(t, expr.StartByte(), 2)
@@ -275,10 +275,10 @@ func TestTreeEdit(t *testing.T) {
 			NewEndPosition: Point{Row: 0, Column: 4},
 		})
 
-		expr := tree.RootNode().Child(0).Child(0)
-		child1 := expr.Child(0)
-		child2 := expr.Child(1)
-		child3 := expr.Child(2)
+		expr := nodeMust(nodeMust(tree.RootNode().Child(0)).Child(0))
+		child1 := nodeMust(expr.Child(0))
+		child2 := nodeMust(expr.Child(1))
+		child3 := nodeMust(expr.Child(2))
 
 		assert.True(t, expr.HasChanges())
 		assert.EqualValues(t, expr.StartByte(), 2)
@@ -307,10 +307,10 @@ func TestTreeEdit(t *testing.T) {
 			NewEndPosition: Point{Row: 0, Column: 8},
 		})
 
-		expr := tree.RootNode().Child(0).Child(0)
-		child1 := expr.Child(0)
-		child2 := expr.Child(1)
-		child3 := expr.Child(2)
+		expr := nodeMust(nodeMust(tree.RootNode().Child(0)).Child(0))
+		child1 := nodeMust(expr.Child(0))
+		child2 := nodeMust(expr.Child(1))
+		child3 := nodeMust(expr.Child(2))
 
 		assert.True(t, expr.HasChanges())
 		assert.EqualValues(t, expr.StartByte(), 2)
@@ -602,8 +602,8 @@ func TestTreeNodeEquality(t *testing.T) {
 	node2 := tree.RootNode()
 
 	assert.Equal(t, node1, node2)
-	assert.Equal(t, node1.Child(0), node2.Child(0))
-	assert.NotEqual(t, node1.Child(0), node2)
+	assert.Equal(t, nodeMust(node1.Child(0)), nodeMust(node2.Child(0)))
+	assert.NotEqual(t, nodeMust(node1.Child(0)), node2)
 }
 
 func TestGetChangedRanges(t *testing.T) {
