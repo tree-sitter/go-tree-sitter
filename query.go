@@ -792,7 +792,8 @@ func (qm *QueryMatch) Id() uint {
 func newQueryMatch(m *C.TSQueryMatch, cursor *C.TSQueryCursor) QueryMatch {
 	var captures []QueryCapture
 	if m.capture_count > 0 {
-		captures = (*[1 << 16]QueryCapture)(unsafe.Pointer(m.captures))[:m.capture_count:m.capture_count]
+		cCaptures := unsafe.Slice(m.captures, m.capture_count)
+		captures = *(*[]QueryCapture)(unsafe.Pointer(&cCaptures))
 	}
 	return QueryMatch{
 		cursor:       cursor,
@@ -917,6 +918,9 @@ func NewQueryProperty(key string, value *string, captureId *uint) QueryProperty 
 
 // Next will return the next match in the sequence of matches.
 //
+// Subsequent calls to [QueryMatches.Next] will overwrite the memory at the same location as prior matches, since the memory is reused. You can think of this as a stateful iterator.
+// If you need to keep the data of a prior match without it being overwritten, you should copy what you need before calling [QueryMatches.Next] again.
+//
 // If there are no more matches, it will return nil.
 func (qm *QueryMatches) Next() *QueryMatch {
 	for {
@@ -939,6 +943,9 @@ func (qm *QueryMatches) Next() *QueryMatch {
 }
 
 // Next will return the next match in the sequence of matches, as well as the index of the capture.
+//
+// Subsequent calls to [QueryCaptures.Next] will overwrite the memory at the same location as prior matches, since the memory is reused. You can think of this as a stateful iterator.
+// If you need to keep the data of a prior match without it being overwritten, you should copy what you need before calling [QueryCaptures.Next] again.
 //
 // If there are no more matches, it will return nil.
 func (qc *QueryCaptures) Next() (*QueryMatch, uint) {
