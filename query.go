@@ -918,8 +918,8 @@ func NewQueryProperty(key string, value *string, captureId *uint) QueryProperty 
 
 // Next will return the next match in the sequence of matches.
 //
-// Subsequent calls to [QueryMatches.Next] will reuse the same memory,
-// this means that you need to copy/take out what you need from the [QueryMatch] before calling [QueryMatches.Next] again.
+// Subsequent calls to [QueryMatches.Next] will overwrite the memory at the same location as prior matches, since the memory is reused. You can think of this as a stateful iterator.
+// If you need to keep the data of a prior match without it being overwritten, you should copy what you need before calling [QueryMatches.Next] again.
 //
 // If there are no more matches, it will return nil.
 func (qm *QueryMatches) Next() *QueryMatch {
@@ -944,8 +944,8 @@ func (qm *QueryMatches) Next() *QueryMatch {
 
 // Next will return the next match in the sequence of matches, as well as the index of the capture.
 //
-// Subsequent calls to [QueryCaptures.Next] will reuse the same memory,
-// this means that you need to copy/take out what you need from the [QueryMatch] before calling [QueryCaptures.Next] again.
+// Subsequent calls to [QueryCaptures.Next] will overwrite the memory at the same location as prior matches, since the memory is reused. You can think of this as a stateful iterator.
+// If you need to keep the data of a prior match without it being overwritten, you should copy what you need before calling [QueryCaptures.Next] again.
 //
 // If there are no more matches, it will return nil.
 func (qc *QueryCaptures) Next() (*QueryMatch, uint) {
