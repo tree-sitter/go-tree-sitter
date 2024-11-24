@@ -792,8 +792,8 @@ func (qm *QueryMatch) Id() uint {
 func newQueryMatch(m *C.TSQueryMatch, cursor *C.TSQueryCursor) QueryMatch {
 	var captures []QueryCapture
 	if m.capture_count > 0 {
-		cc := unsafe.Slice(m.captures, m.capture_count)
-		captures = *(*[]QueryCapture)(unsafe.Pointer(&cc))
+		cCaptures := unsafe.Slice(m.captures, m.capture_count)
+		captures = *(*[]QueryCapture)(unsafe.Pointer(&cCaptures))
 	}
 	return QueryMatch{
 		cursor:       cursor,
