@@ -66,9 +66,12 @@ import (
 func main() {
 	path := "/path/to/your/parser.so"
 	lib, err := purego.Dlopen(path, purego.RTLD_NOW|purego.RTLD_GLOBAL)
+	if err != nil {
+        // handle error
+    }
 
 	var javascriptLanguage func() uintptr
-	purego.RegisterLibFunc(&javascriptLanguage, "libtree-siiter-javascript.so", "tree_sitter_javascript")
+	purego.RegisterLibFunc(&javascriptLanguage, lib, "tree_sitter_javascript")
 
 	language := tree_sitter.NewLanguage(unsafe.Pointer(javascriptLanguage()))
 }
