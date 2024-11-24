@@ -713,7 +713,7 @@ func (qc *QueryCursor) DidExceedMatchLimit() bool {
 // captures. Because multiple patterns can match the same set of nodes,
 // one match may contain captures that appear *before* some of the
 // captures from a previous match.
-func (qc *QueryCursor) Matches(query *Query, node *Node, text []byte) QueryMatches {
+func (qc *QueryCursor) Matches(query *Query, node Node, text []byte) QueryMatches {
 	C.ts_query_cursor_exec(qc._inner, query._inner, node._inner)
 	qm := QueryMatches{
 		_inner:  qc._inner,
@@ -737,7 +737,7 @@ func (qc *QueryCursor) Matches(query *Query, node *Node, text []byte) QueryMatch
 //
 // This is useful if you don't care about which pattern matched, and just
 // want a single, ordered sequence of captures.
-func (qc *QueryCursor) Captures(query *Query, node *Node, text []byte) QueryCaptures {
+func (qc *QueryCursor) Captures(query *Query, node Node, text []byte) QueryCaptures {
 	C.ts_query_cursor_exec(qc._inner, query._inner, node._inner)
 	return QueryCaptures{
 		_inner:  qc._inner,

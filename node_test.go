@@ -157,20 +157,22 @@ func TestNodeChild(t *testing.T) {
 	assert.Equal(t, Point{6, 9}, nullNode.StartPosition())
 	assert.Equal(t, Point{6, 13}, nullNode.EndPosition())
 
+	rootNode := tree.RootNode()
+
 	assert.Equal(t, pairNode, stringNode.Parent())
 	assert.Equal(t, pairNode, nullNode.Parent())
 	assert.Equal(t, objectNode, pairNode.Parent())
 	assert.Equal(t, arrayNode, numberNode.Parent())
 	assert.Equal(t, arrayNode, falseNode.Parent())
 	assert.Equal(t, arrayNode, objectNode.Parent())
-	assert.Equal(t, tree.RootNode(), arrayNode.Parent())
+	assert.Equal(t, &rootNode, arrayNode.Parent())
 	assert.Nil(t, tree.RootNode().Parent())
 
-	assert.Equal(t, arrayNode, tree.RootNode().ChildWithDescendant(nullNode))
-	assert.Equal(t, objectNode, arrayNode.ChildWithDescendant(nullNode))
-	assert.Equal(t, pairNode, objectNode.ChildWithDescendant(nullNode))
-	assert.Equal(t, nullNode, pairNode.ChildWithDescendant(nullNode))
-	assert.Nil(t, nullNode.ChildWithDescendant(nullNode))
+	assert.Equal(t, arrayNode, tree.RootNode().ChildWithDescendant(*nullNode))
+	assert.Equal(t, objectNode, arrayNode.ChildWithDescendant(*nullNode))
+	assert.Equal(t, pairNode, objectNode.ChildWithDescendant(*nullNode))
+	assert.Equal(t, nullNode, pairNode.ChildWithDescendant(*nullNode))
+	assert.Nil(t, nullNode.ChildWithDescendant(*nullNode))
 }
 
 func TestNodeChildren(t *testing.T) {
@@ -273,8 +275,8 @@ func TestParentOfZeroWithNode(t *testing.T) {
 	assert.Equal(t, "function_definition", blockParent.Kind())
 	assert.Equal(t, "(function_definition name: (identifier) parameters: (parameters (identifier)) body: (block))", blockParent.ToSexp())
 
-	assert.Equal(t, functionDefinition, root.ChildContainingDescendant(block))
-	assert.Nil(t, functionDefinition.ChildContainingDescendant(block))
+	assert.Equal(t, functionDefinition, root.ChildContainingDescendant(*block))
+	assert.Nil(t, functionDefinition.ChildContainingDescendant(*block))
 }
 
 func TestNodeFieldNameForChild(t *testing.T) {
@@ -397,19 +399,21 @@ func TestNodeNamedChild(t *testing.T) {
 	assert.Equal(t, Point{6, 9}, nullNode.StartPosition())
 	assert.Equal(t, Point{6, 13}, nullNode.EndPosition())
 
+	rootNode := tree.RootNode()
+
 	assert.Equal(t, pairNode, stringNode.Parent())
 	assert.Equal(t, pairNode, nullNode.Parent())
 	assert.Equal(t, objectNode, pairNode.Parent())
 	assert.Equal(t, arrayNode, numberNode.Parent())
 	assert.Equal(t, arrayNode, falseNode.Parent())
 	assert.Equal(t, arrayNode, objectNode.Parent())
-	assert.Equal(t, tree.RootNode(), arrayNode.Parent())
+	assert.Equal(t, &rootNode, arrayNode.Parent())
 	assert.Nil(t, tree.RootNode().Parent())
 
-	assert.Equal(t, arrayNode, tree.RootNode().ChildContainingDescendant(nullNode))
-	assert.Equal(t, objectNode, arrayNode.ChildContainingDescendant(nullNode))
-	assert.Equal(t, pairNode, objectNode.ChildContainingDescendant(nullNode))
-	assert.Nil(t, pairNode.ChildContainingDescendant(nullNode))
+	assert.Equal(t, arrayNode, tree.RootNode().ChildContainingDescendant(*nullNode))
+	assert.Equal(t, objectNode, arrayNode.ChildContainingDescendant(*nullNode))
+	assert.Equal(t, pairNode, objectNode.ChildContainingDescendant(*nullNode))
+	assert.Nil(t, pairNode.ChildContainingDescendant(*nullNode))
 }
 
 func TestNodeDescendantCount(t *testing.T) {

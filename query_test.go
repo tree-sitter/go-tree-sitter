@@ -4689,7 +4689,7 @@ func TestQueryMaxStartDepthMore(t *testing.T) {
 	for _, row := range rows {
 		cursor.SetMaxStartDepth(&row.depth)
 
-		matches := cursor.Matches(query, &node, []byte(source))
+		matches := cursor.Matches(query, node, []byte(source))
 		assert.Equal(t, row.matches, collectMatches(matches, query, source))
 	}
 }
