@@ -80,7 +80,7 @@
 static const unsigned MAX_VERSION_COUNT = 6;
 static const unsigned MAX_VERSION_COUNT_OVERFLOW = 4;
 static const unsigned MAX_SUMMARY_DEPTH = 16;
-static const unsigned MAX_COST_DIFFERENCE = 16 * ERROR_COST_PER_SKIPPED_TREE;
+static const unsigned MAX_COST_DIFFERENCE = 18 * ERROR_COST_PER_SKIPPED_TREE;
 static const unsigned OP_COUNT_PER_PARSER_TIMEOUT_CHECK = 100;
 
 typedef struct {
@@ -111,8 +111,12 @@ struct TSParser {
   const volatile size_t *cancellation_flag;
   Subtree old_tree;
   TSRangeArray included_range_differences;
+  TSParseOptions parse_options;
+  TSParseState parse_state;
   unsigned included_range_difference_index;
   bool has_scanner_error;
+  bool canceled_balancing;
+  bool has_error;
 };
 
 typedef struct {
@@ -340,7 +344,7 @@ static bool ts_parser__better_version_exists(
   return false;
 }
 
-static bool ts_parser__call_main_lex_fn(TSParser *self, TSLexMode lex_mode) {
+static bool ts_parser__call_main_lex_fn(TSParser *self, TSLexerMode lex_mode) {
   if (ts_language_is_wasm(self->language)) {
     return ts_wasm_store_call_lex_main(self->wasm_store, lex_mode.lex_state);
   } else {
@@ -471,10 +475,10 @@ static bool ts_parser__can_reuse_first_leaf(
   Subtree tree,
   TableEntry *table_entry
 ) {
-  TSLexMode current_lex_mode = self->language->lex_modes[state];
   TSSymbol leaf_symbol = ts_subtree_leaf_symbol(tree);
   TSStateId leaf_state = ts_subtree_leaf_parse_state(tree);
-  TSLexMode leaf_lex_mode = self->language->lex_modes[leaf_state];
+  TSLexerMode current_lex_mode = ts_language_lex_mode_for_state(self->language, state);
+  TSLexerMode leaf_lex_mode = ts_language_lex_mode_for_state(self->language, leaf_state);
 
   // At the end of a non-terminal extra node, the lexer normally returns
   // NULL, which indicates that the parser should look for a reduce action
@@ -485,7 +489,7 @@ static bool ts_parser__can_reuse_first_leaf(
   // If the token was created in a state with the same set of lookaheads, it is reusable.
   if (
     table_entry->action_count > 0 &&
-    memcmp(&leaf_lex_mode, &current_lex_mode, sizeof(TSLexMode)) == 0 &&
+    memcmp(&leaf_lex_mode, &current_lex_mode, sizeof(TSLexerMode)) == 0 &&
     (
       leaf_symbol != self->language->keyword_capture_token ||
       (!ts_subtree_is_keyword(tree) && ts_subtree_parse_state(tree) == state)
@@ -505,7 +509,7 @@ static Subtree ts_parser__lex(
   StackVersion version,
   TSStateId parse_state
 ) {
-  TSLexMode lex_mode = self->language->lex_modes[parse_state];
+  TSLexerMode lex_mode = ts_language_lex_mode_for_state(self->language, parse_state);
   if (lex_mode.lex_state == (uint16_t)-1) {
     LOG("no_lookahead_after_non_terminal_extra");
     return NULL_SUBTREE;
@@ -529,6 +533,7 @@ static Subtree ts_parser__lex(
   for (;;) {
     bool found_token = false;
     Length current_position = self->lexer.current_position;
+    ColumnData column_data = self->lexer.column_data;
 
     if (lex_mode.external_lex_state != 0) {
       LOG(
@@ -582,6 +587,7 @@ static Subtree ts_parser__lex(
       }
 
       ts_lexer_reset(&self->lexer, current_position);
+      self->lexer.column_data = column_data;
     }
 
     LOG(
@@ -597,7 +603,7 @@ static Subtree ts_parser__lex(
 
     if (!error_mode) {
       error_mode = true;
-      lex_mode = self->language->lex_modes[ERROR_STATE];
+      lex_mode = ts_language_lex_mode_for_state(self->language, ERROR_STATE);
       ts_lexer_reset(&self->lexer, start_position);
       continue;
     }
@@ -654,7 +660,10 @@ static Subtree ts_parser__lex(
       if (
         is_keyword &&
         self->lexer.token_end_position.bytes == end_byte &&
-        ts_language_has_actions(self->language, parse_state, self->lexer.data.result_symbol)
+        (
+          ts_language_has_actions(self->language, parse_state, self->lexer.data.result_symbol) ||
+          ts_language_is_reserved_word(self->language, parse_state, self->lexer.data.result_symbol)
+        )
       ) {
         symbol = self->lexer.data.result_symbol;
       }
@@ -1411,6 +1420,16 @@ static void ts_parser__recover(
       self->stack, version, ts_subtree_last_external_token(lookahead)
     );
   }
+
+  bool has_error = true;
+  for (unsigned i = 0; i < ts_stack_version_count(self->stack); i++) {
+    ErrorStatus status = ts_parser__version_status(self, i);
+    if (!status.is_in_error) {
+      has_error = false;
+      break;
+    }
+  }
+  self->has_error = has_error;
 }
 
 static void ts_parser__handle_error(
@@ -1510,6 +1529,32 @@ static void ts_parser__handle_error(
   LOG_STACK();
 }
 
+static bool ts_parser__check_progress(TSParser *self, Subtree *lookahead, const uint32_t *position, unsigned operations) {
+  self->operation_count += operations;
+  if (self->operation_count >= OP_COUNT_PER_PARSER_TIMEOUT_CHECK) {
+    self->operation_count = 0;
+  }
+  if (self->parse_options.progress_callback && position != NULL) {
+    self->parse_state.current_byte_offset = *position;
+    self->parse_state.has_error = self->has_error;
+  }
+  if (
+    self->operation_count == 0 &&
+    (
+      // TODO(amaanq): remove cancellation flag & clock checks before 0.26
+      (self->cancellation_flag && atomic_load(self->cancellation_flag)) ||
+      (!clock_is_null(self->end_clock) && clock_is_gt(clock_now(), self->end_clock)) ||
+      (self->parse_options.progress_callback && self->parse_options.progress_callback(&self->parse_state))
+    )
+  ) {
+    if (lookahead && lookahead->ptr) {
+      ts_subtree_release(&self->tree_pool, *lookahead);
+    }
+    return false;
+  }
+  return true;
+}
+
 static bool ts_parser__advance(
   TSParser *self,
   StackVersion version,
@@ -1560,19 +1605,9 @@ static bool ts_parser__advance(
       }
     }
 
-    // If a cancellation flag or a timeout was provided, then check every
+    // If a cancellation flag, timeout, or progress callback was provided, then check every
     // time a fixed number of parse actions has been processed.
-    if (++self->operation_count == OP_COUNT_PER_PARSER_TIMEOUT_CHECK) {
-      self->operation_count = 0;
-    }
-    if (
-      self->operation_count == 0 &&
-      ((self->cancellation_flag && atomic_load(self->cancellation_flag)) ||
-       (!clock_is_null(self->end_clock) && clock_is_gt(clock_now(), self->end_clock)))
-    ) {
-      if (lookahead.ptr) {
-        ts_subtree_release(&self->tree_pool, lookahead);
-      }
+    if (!ts_parser__check_progress(self, &lookahead, &position, 1)) {
       return false;
     }
 
@@ -1674,15 +1709,20 @@ static bool ts_parser__advance(
       return true;
     }
 
-    // If there were no parse actions for the current lookahead token, then
-    // it is not valid in this state. If the current lookahead token is a
-    // keyword, then switch to treating it as the normal word token if that
-    // token is valid in this state.
+    // If the current lookahead token is a keyword that is not valid, but the
+    // default word token *is* valid, then treat the lookahead token as the word
+    // token instead.
     if (
       ts_subtree_is_keyword(lookahead) &&
-      ts_subtree_symbol(lookahead) != self->language->keyword_capture_token
+      ts_subtree_symbol(lookahead) != self->language->keyword_capture_token &&
+      !ts_language_is_reserved_word(self->language, state, ts_subtree_symbol(lookahead))
     ) {
-      ts_language_table_entry(self->language, state, self->language->keyword_capture_token, &table_entry);
+      ts_language_table_entry(
+        self->language,
+        state,
+        self->language->keyword_capture_token,
+        &table_entry
+      );
       if (table_entry.action_count > 0) {
         LOG(
           "switch from_keyword:%s, to_word_token:%s",
@@ -1697,19 +1737,10 @@ static bool ts_parser__advance(
       }
     }
 
-    // If the current lookahead token is not valid and the parser is
-    // already in the error state, restart the error recovery process.
-    // TODO - can this be unified with the other `RECOVER` case above?
-    if (state == ERROR_STATE) {
-      ts_parser__recover(self, version, lookahead);
-      return true;
-    }
-
-    // If the current lookahead token is not valid and the previous
-    // subtree on the stack was reused from an old tree, it isn't actually
-    // valid to reuse it. Remove it from the stack, and in its place,
-    // push each of its children. Then try again to process the current
-    // lookahead.
+    // If the current lookahead token is not valid and the previous subtree on
+    // the stack was reused from an old tree, then it wasn't actually valid to
+    // reuse that previous subtree. Remove it from the stack, and in its place,
+    // push each of its children. Then try again to process the current lookahead.
     if (ts_parser__breakdown_top_of_stack(self, version)) {
       state = ts_stack_state(self->stack, version);
       ts_subtree_release(&self->tree_pool, lookahead);
@@ -1717,11 +1748,11 @@ static bool ts_parser__advance(
       continue;
     }
 
-    // At this point, the current lookahead token is definitely not valid
-    // for this parse stack version. Mark this version as paused and continue
-    // processing any other stack versions that might exist. If some other
-    // version advances successfully, then this version can simply be removed.
-    // But if all versions end up paused, then error recovery is needed.
+    // Otherwise, there is definitely an error in this version of the parse stack.
+    // Mark this version as paused and continue processing any other stack
+    // versions that exist. If some other version advances successfully, then
+    // this version can simply be removed. But if all versions end up paused,
+    // then error recovery is needed.
     LOG("detect_error");
     ts_stack_pause(self->stack, version, lookahead);
     return true;
@@ -1828,8 +1859,66 @@ static unsigned ts_parser__condense_stack(TSParser *self) {
   return min_error_cost;
 }
 
+static bool ts_parser__balance_subtree(TSParser *self) {
+  Subtree finished_tree = self->finished_tree;
+
+  // If we haven't canceled balancing in progress before, then we want to clear the tree stack and
+  // push the initial finished tree onto it. Otherwise, if we're resuming balancing after a
+  // cancellation, we don't want to clear the tree stack.
+  if (!self->canceled_balancing) {
+    array_clear(&self->tree_pool.tree_stack);
+    if (ts_subtree_child_count(finished_tree) > 0 && finished_tree.ptr->ref_count == 1) {
+      array_push(&self->tree_pool.tree_stack, ts_subtree_to_mut_unsafe(finished_tree));
+    }
+  }
+
+  while (self->tree_pool.tree_stack.size > 0) {
+    if (!ts_parser__check_progress(self, NULL, NULL, 1)) {
+      return false;
+    }
+
+    MutableSubtree tree = self->tree_pool.tree_stack.contents[
+      self->tree_pool.tree_stack.size - 1
+    ];
+
+    if (tree.ptr->repeat_depth > 0) {
+      Subtree child1 = ts_subtree_children(tree)[0];
+      Subtree child2 = ts_subtree_children(tree)[tree.ptr->child_count - 1];
+      long repeat_delta = (long)ts_subtree_repeat_depth(child1) - (long)ts_subtree_repeat_depth(child2);
+      if (repeat_delta > 0) {
+        unsigned n = (unsigned)repeat_delta;
+
+        for (unsigned i = n / 2; i > 0; i /= 2) {
+          ts_subtree_compress(tree, i, self->language, &self->tree_pool.tree_stack);
+          n -= i;
+
+          // We scale the operation count increment in `ts_parser__check_progress` proportionately to the compression
+          // size since larger values of i take longer to process. Shifting by 4 empirically provides good check
+          // intervals (e.g. 193 operations when i=3100) to prevent blocking during large compressions.
+          uint8_t operations = i >> 4 > 0 ? i >> 4 : 1;
+          if (!ts_parser__check_progress(self, NULL, NULL, operations)) {
+            return false;
+          }
+        }
+      }
+    }
+
+    (void)array_pop(&self->tree_pool.tree_stack);
+
+    for (uint32_t i = 0; i < tree.ptr->child_count; i++) {
+      Subtree child = ts_subtree_children(tree)[i];
+      if (ts_subtree_child_count(child) > 0 && child.ptr->ref_count == 1) {
+        array_push(&self->tree_pool.tree_stack, ts_subtree_to_mut_unsafe(child));
+      }
+    }
+  }
+
+  return true;
+}
+
 static bool ts_parser_has_outstanding_parse(TSParser *self) {
   return (
+    self->canceled_balancing ||
     self->external_scanner_payload ||
     ts_stack_state(self->stack, 0) != 1 ||
     ts_stack_node_count_since_error(self->stack, 0) != 0
@@ -1852,6 +1941,8 @@ TSParser *ts_parser_new(void) {
   self->timeout_duration = 0;
   self->language = NULL;
   self->has_scanner_error = false;
+  self->has_error = false;
+  self->canceled_balancing = false;
   self->external_scanner_payload = NULL;
   self->end_clock = clock_null();
   self->operation_count = 0;
@@ -1899,8 +1990,8 @@ bool ts_parser_set_language(TSParser *self, const TSLanguage *language) {
 
   if (language) {
     if (
-      language->version > TREE_SITTER_LANGUAGE_VERSION ||
-      language->version < TREE_SITTER_MIN_COMPATIBLE_LANGUAGE_VERSION
+      language->abi_version > TREE_SITTER_LANGUAGE_VERSION ||
+      language->abi_version < TREE_SITTER_MIN_COMPATIBLE_LANGUAGE_VERSION
     ) return false;
 
     if (ts_language_is_wasm(language)) {
@@ -1988,6 +2079,9 @@ void ts_parser_reset(TSParser *self) {
   }
   self->accept_count = 0;
   self->has_scanner_error = false;
+  self->has_error = false;
+  self->parse_options = (TSParseOptions) {0};
+  self->parse_state = (TSParseState) {0};
 }
 
 TSTree *ts_parser_parse(
@@ -2007,8 +2101,16 @@ TSTree *ts_parser_parse(
   array_clear(&self->included_range_differences);
   self->included_range_difference_index = 0;
 
+  self->operation_count = 0;
+  if (self->timeout_duration) {
+    self->end_clock = clock_after(clock_now(), self->timeout_duration);
+  } else {
+    self->end_clock = clock_null();
+  }
+
   if (ts_parser_has_outstanding_parse(self)) {
     LOG("resume_parsing");
+    if (self->canceled_balancing) goto balance;
   } else {
     ts_parser__external_scanner_create(self);
     if (self->has_scanner_error) goto exit;
@@ -2032,13 +2134,6 @@ TSTree *ts_parser_parse(
       reusable_node_clear(&self->reusable_node);
       LOG("new_parse");
     }
-  }
-
-  self->operation_count = 0;
-  if (self->timeout_duration) {
-    self->end_clock = clock_after(clock_now(), self->timeout_duration);
-  } else {
-    self->end_clock = clock_null();
   }
 
   uint32_t position = 0, last_position = 0, version_count = 0;
@@ -2098,8 +2193,13 @@ TSTree *ts_parser_parse(
     }
   } while (version_count != 0);
 
+balance:
   ts_assert(self->finished_tree.ptr);
-  ts_subtree_balance(self->finished_tree, &self->tree_pool, self->language);
+  if (!ts_parser__balance_subtree(self)) {
+    self->canceled_balancing = true;
+    return false;
+  }
+  self->canceled_balancing = false;
   LOG("done");
   LOG_TREE(self->finished_tree);
 
@@ -2113,6 +2213,18 @@ TSTree *ts_parser_parse(
 
 exit:
   ts_parser_reset(self);
+  return result;
+}
+
+TSTree *ts_parser_parse_with_options(
+  TSParser *self,
+  const TSTree *old_tree,
+  TSInput input,
+  TSParseOptions parse_options
+) {
+  self->parse_options = parse_options;
+  self->parse_state.payload = parse_options.payload;
+  TSTree *result = ts_parser_parse(self, old_tree, input);
   return result;
 }
 
@@ -2137,6 +2249,7 @@ TSTree *ts_parser_parse_string_encoding(
     &input,
     ts_string_input_read,
     encoding,
+    NULL,
   });
 }
 

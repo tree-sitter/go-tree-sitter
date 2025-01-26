@@ -16,6 +16,14 @@
 #include <wasm.h>
 #include <wasmtime.h>
 
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable : 4100)
+#elif defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+#endif
+
 #define array_len(a) (sizeof(a) / sizeof(a[0]))
 
 // The following symbols from the C and C++ standard libraries are available
@@ -109,7 +117,7 @@ typedef Array(char) StringData;
 // LanguageInWasmMemory - The memory layout of a `TSLanguage` when compiled to
 // wasm32. This is used to copy static language data out of the wasm memory.
 typedef struct {
-  uint32_t version;
+  uint32_t abi_version;
   uint32_t symbol_count;
   uint32_t alias_count;
   uint32_t token_count;
@@ -145,6 +153,14 @@ typedef struct {
     int32_t deserialize;
   } external_scanner;
   int32_t primary_state_ids;
+  int32_t name;
+  int32_t reserved_words;
+  uint16_t max_reserved_word_set_size;
+  uint32_t supertype_count;
+  int32_t supertype_symbols;
+  int32_t supertype_map_slices;
+  int32_t supertype_map_entries;
+  TSLanguageMetadata metadata;
 } LanguageInWasmMemory;
 
 // LexerInWasmMemory - The memory layout of a `TSLexer` when compiled to wasm32.
@@ -159,8 +175,6 @@ typedef struct {
   int32_t eof;
 } LexerInWasmMemory;
 
-static volatile uint32_t NEXT_LANGUAGE_ID;
-
 // Linear memory layout:
 // [ <-- stack | stdlib statics | lexer | language statics --> | serialization_buffer | heap --> ]
 #define MAX_MEMORY_SIZE (128 * 1024 * 1024 / MEMORY_PAGE_SIZE)
@@ -169,7 +183,7 @@ static volatile uint32_t NEXT_LANGUAGE_ID;
  * WasmDylinkMemoryInfo
  ***********************/
 
-static uint8_t read_u8(const uint8_t **p, const uint8_t *end) {
+static uint8_t read_u8(const uint8_t **p) {
   return *(*p)++;
 }
 
@@ -204,7 +218,7 @@ static bool wasm_dylink_info__parse(
   p += 4;
 
   while (p < end) {
-    uint8_t section_id = read_u8(&p, end);
+    uint8_t section_id = read_u8(&p);
     uint32_t section_length = read_uleb128(&p, end);
     const uint8_t *section_end = p + section_length;
     if (section_end > end) return false;
@@ -217,7 +231,7 @@ static bool wasm_dylink_info__parse(
       if (name_length == 8 && memcmp(p, "dylink.0", 8) == 0) {
         p = name_end;
         while (p < section_end) {
-          uint8_t subsection_type = read_u8(&p, section_end);
+          uint8_t subsection_type = read_u8(&p);
           uint32_t subsection_size = read_uleb128(&p, section_end);
           const uint8_t *subsection_end = p + subsection_size;
           if (subsection_end > section_end) return false;
@@ -408,6 +422,17 @@ static void *copy_strings(
   return result;
 }
 
+static void *copy_string(
+  const uint8_t *data,
+  int32_t address
+) {
+  const char *string = (const char *)&data[address];
+  size_t len = strlen(string);
+  char *result = ts_malloc(len + 1);
+  memcpy(result, string, len + 1);
+  return result;
+}
+
 static bool name_eq(const wasm_name_t *name, const char *string) {
   return strncmp(string, name->data, name->size) == 0;
 }
@@ -545,6 +570,7 @@ TSWasmStore *ts_wasm_store_new(TSWasmEngine *engine, TSWasmError *wasm_error) {
   wasm_trap_t *trap = NULL;
   wasm_message_t message = WASM_EMPTY_VEC;
   wasm_exporttype_vec_t export_types = WASM_EMPTY_VEC;
+  wasm_importtype_vec_t import_types = WASM_EMPTY_VEC;
   wasmtime_extern_t *imports = NULL;
   wasmtime_module_t *stdlib_module = NULL;
   wasm_memorytype_t *memory_type = NULL;
@@ -660,11 +686,10 @@ TSWasmStore *ts_wasm_store_new(TSWasmEngine *engine, TSWasmError *wasm_error) {
   }
 
   // Retrieve the stdlib module's imports.
-  wasm_importtype_vec_t import_types = WASM_EMPTY_VEC;
   wasmtime_module_imports(stdlib_module, &import_types);
 
   // Find the initial number of memory pages needed by the stdlib.
-  const wasm_memorytype_t *stdlib_memory_type;
+  const wasm_memorytype_t *stdlib_memory_type = NULL;
   for (unsigned i = 0; i < import_types.size; i++) {
     wasm_importtype_t *import_type = import_types.data[i];
     const wasm_name_t *import_name = wasm_importtype_name(import_type);
@@ -864,7 +889,7 @@ TSWasmStore *ts_wasm_store_new(TSWasmEngine *engine, TSWasmError *wasm_error) {
 
   // Add all of the lexer callback functions to the function table. Store their function table
   // indices on the in-memory lexer.
-  uint32_t table_index;
+  uint64_t table_index;
   error = wasmtime_table_grow(context, &function_table, lexer_definitions_len, &initializer, &table_index);
   if (error) {
     wasmtime_error_message(error, &message);
@@ -965,7 +990,7 @@ static bool ts_wasm_store__instantiate(
 
   // Grow the function table to make room for the new functions.
   wasmtime_val_t initializer = {.kind = WASMTIME_FUNCREF};
-  uint32_t prev_table_size;
+  uint64_t prev_table_size;
   error = wasmtime_table_grow(context, &self->function_table, dylink_info->table_size, &initializer, &prev_table_size);
   if (error) {
     format(error_message, "invalid function table size %u", dylink_info->table_size);
@@ -1195,31 +1220,28 @@ const TSLanguage *ts_wasm_store_load_language(
   const uint8_t *memory = wasmtime_memory_data(context, &self->memory);
   memcpy(&wasm_language, &memory[language_address], sizeof(LanguageInWasmMemory));
 
-  if (wasm_language.version < LANGUAGE_VERSION_USABLE_VIA_WASM) {
-      wasm_error->kind = TSWasmErrorKindInstantiate;
-      format(&wasm_error->message, "language version %u is too old for wasm", wasm_language.version);
-      goto error;
-  }
-
   int32_t addresses[] = {
-    wasm_language.alias_map,
-    wasm_language.alias_sequences,
-    wasm_language.field_map_entries,
-    wasm_language.field_map_slices,
-    wasm_language.field_names,
-    wasm_language.keyword_lex_fn,
-    wasm_language.lex_fn,
-    wasm_language.lex_modes,
-    wasm_language.parse_actions,
     wasm_language.parse_table,
-    wasm_language.primary_state_ids,
-    wasm_language.primary_state_ids,
-    wasm_language.public_symbol_map,
     wasm_language.small_parse_table,
     wasm_language.small_parse_table_map,
-    wasm_language.symbol_metadata,
-    wasm_language.symbol_metadata,
+    wasm_language.parse_actions,
     wasm_language.symbol_names,
+    wasm_language.field_names,
+    wasm_language.field_map_slices,
+    wasm_language.field_map_entries,
+    wasm_language.symbol_metadata,
+    wasm_language.public_symbol_map,
+    wasm_language.alias_map,
+    wasm_language.alias_sequences,
+    wasm_language.lex_modes,
+    wasm_language.lex_fn,
+    wasm_language.keyword_lex_fn,
+    wasm_language.primary_state_ids,
+    wasm_language.name,
+    wasm_language.reserved_words,
+    wasm_language.supertype_symbols,
+    wasm_language.supertype_map_entries,
+    wasm_language.supertype_map_slices,
     wasm_language.external_token_count > 0 ? wasm_language.external_scanner.states : 0,
     wasm_language.external_token_count > 0 ? wasm_language.external_scanner.symbol_map : 0,
     wasm_language.external_token_count > 0 ? wasm_language.external_scanner.create : 0,
@@ -1237,7 +1259,7 @@ const TSLanguage *ts_wasm_store_load_language(
   StringData field_name_buffer = array_new();
 
   *language = (TSLanguage) {
-    .version = wasm_language.version,
+    .abi_version = wasm_language.abi_version,
     .symbol_count = wasm_language.symbol_count,
     .alias_count = wasm_language.alias_count,
     .token_count = wasm_language.token_count,
@@ -1246,8 +1268,10 @@ const TSLanguage *ts_wasm_store_load_language(
     .large_state_count = wasm_language.large_state_count,
     .production_id_count = wasm_language.production_id_count,
     .field_count = wasm_language.field_count,
+    .supertype_count = wasm_language.supertype_count,
     .max_alias_sequence_length = wasm_language.max_alias_sequence_length,
     .keyword_capture_token = wasm_language.keyword_capture_token,
+    .metadata = wasm_language.metadata,
     .parse_table = copy(
       &memory[wasm_language.parse_table],
       wasm_language.large_state_count * wasm_language.symbol_count * sizeof(uint16_t)
@@ -1274,21 +1298,21 @@ const TSLanguage *ts_wasm_store_load_language(
     ),
     .lex_modes = copy(
       &memory[wasm_language.lex_modes],
-      wasm_language.state_count * sizeof(TSLexMode)
+      wasm_language.state_count * sizeof(TSLexerMode)
     ),
   };
 
   if (language->field_count > 0 && language->production_id_count > 0) {
     language->field_map_slices = copy(
       &memory[wasm_language.field_map_slices],
-      wasm_language.production_id_count * sizeof(TSFieldMapSlice)
+      wasm_language.production_id_count * sizeof(TSMapSlice)
     );
 
     // Determine the number of field map entries by finding the greatest index
     // in any of the slices.
     uint32_t field_map_entry_count = 0;
     for (uint32_t i = 0; i < wasm_language.production_id_count; i++) {
-      TSFieldMapSlice slice = language->field_map_slices[i];
+      TSMapSlice slice = language->field_map_slices[i];
       uint32_t slice_end = slice.index + slice.length;
       if (slice_end > field_map_entry_count) {
         field_map_entry_count = slice_end;
@@ -1304,6 +1328,37 @@ const TSLanguage *ts_wasm_store_load_language(
       wasm_language.field_names,
       wasm_language.field_count + 1,
       &field_name_buffer
+    );
+  }
+
+  if (language->supertype_count > 0) {
+    language->supertype_symbols = copy(
+      &memory[wasm_language.supertype_symbols],
+      wasm_language.supertype_count * sizeof(TSSymbol)
+    );
+
+    // Determine the number of supertype map slices by finding the greatest
+    // supertype ID.
+    int largest_supertype = 0;
+    for (unsigned i = 0; i < language->supertype_count; i++) {
+      TSSymbol supertype = language->supertype_symbols[i];
+      if (supertype > largest_supertype) {
+        largest_supertype = supertype;
+      }
+    }
+
+    language->supertype_map_slices = copy(
+      &memory[wasm_language.supertype_map_slices],
+      (largest_supertype + 1) * sizeof(TSMapSlice)
+    );
+
+    TSSymbol last_supertype = language->supertype_symbols[language->supertype_count - 1];
+    TSMapSlice last_slice = language->supertype_map_slices[last_supertype];
+    uint32_t supertype_map_entry_count = last_slice.index + last_slice.length;
+
+    language->supertype_map_entries = copy(
+      &memory[wasm_language.supertype_map_entries],
+      supertype_map_entry_count * sizeof(char *)
     );
   }
 
@@ -1343,11 +1398,20 @@ const TSLanguage *ts_wasm_store_load_language(
     );
   }
 
-  if (language->version >= LANGUAGE_VERSION_WITH_PRIMARY_STATES) {
+  if (language->abi_version >= LANGUAGE_VERSION_WITH_PRIMARY_STATES) {
     language->primary_state_ids = copy(
       &memory[wasm_language.primary_state_ids],
       wasm_language.state_count * sizeof(TSStateId)
     );
+  }
+
+  if (language->abi_version >= LANGUAGE_VERSION_WITH_RESERVED_WORDS) {
+    language->name = copy_string(memory, wasm_language.name);
+    language->reserved_words = copy(
+        &memory[wasm_language.reserved_words],
+        wasm_language.max_reserved_word_set_size * sizeof(TSSymbol)
+    );
+    language->max_reserved_word_set_size = wasm_language.max_reserved_word_set_size;
   }
 
   if (language->external_token_count > 0) {
@@ -1729,8 +1793,13 @@ void ts_wasm_language_release(const TSLanguage *self) {
     ts_free((void *)self->external_scanner.symbol_map);
     ts_free((void *)self->field_map_entries);
     ts_free((void *)self->field_map_slices);
+    ts_free((void *)self->supertype_symbols);
+    ts_free((void *)self->supertype_map_entries);
+    ts_free((void *)self->supertype_map_slices);
     ts_free((void *)self->field_names);
     ts_free((void *)self->lex_modes);
+    ts_free((void *)self->name);
+    ts_free((void *)self->reserved_words);
     ts_free((void *)self->parse_actions);
     ts_free((void *)self->parse_table);
     ts_free((void *)self->primary_state_ids);
@@ -1742,6 +1811,12 @@ void ts_wasm_language_release(const TSLanguage *self) {
     ts_free((void *)self);
   }
 }
+
+#ifdef _MSC_VER
+#pragma warning(pop)
+#elif defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
 #else
 
