@@ -26,7 +26,7 @@ extern "C" {
  * The Tree-sitter library is generally backwards-compatible with languages
  * generated using older CLI versions, but is not forwards-compatible.
  */
-#define TREE_SITTER_LANGUAGE_VERSION 14
+#define TREE_SITTER_LANGUAGE_VERSION 15
 
 /**
  * The earliest ABI version that is supported by the current version of the
@@ -42,16 +42,27 @@ typedef uint16_t TSStateId;
 typedef uint16_t TSSymbol;
 typedef uint16_t TSFieldId;
 typedef struct TSLanguage TSLanguage;
+typedef struct TSLanguageMetadata TSLanguageMetadata;
 typedef struct TSParser TSParser;
 typedef struct TSTree TSTree;
 typedef struct TSQuery TSQuery;
 typedef struct TSQueryCursor TSQueryCursor;
 typedef struct TSLookaheadIterator TSLookaheadIterator;
 
+// This function signature reads one code point from the given string,
+// returning the number of bytes consumed. It should write the code point
+// to the `code_point` pointer, or write -1 if the input is invalid.
+typedef uint32_t (*DecodeFunction)(
+  const uint8_t *string,
+  uint32_t length,
+  int32_t *code_point
+);
+
 typedef enum TSInputEncoding {
   TSInputEncodingUTF8,
   TSInputEncodingUTF16LE,
   TSInputEncodingUTF16BE,
+  TSInputEncodingCustom
 } TSInputEncoding;
 
 typedef enum TSSymbolType {
@@ -77,7 +88,19 @@ typedef struct TSInput {
   void *payload;
   const char *(*read)(void *payload, uint32_t byte_index, TSPoint position, uint32_t *bytes_read);
   TSInputEncoding encoding;
+  DecodeFunction decode;
 } TSInput;
+
+typedef struct TSParseState {
+  void *payload;
+  uint32_t current_byte_offset;
+  bool has_error;
+} TSParseState;
+
+typedef struct TSParseOptions {
+  void *payload;
+  bool (*progress_callback)(TSParseState *state);
+} TSParseOptions;
 
 typedef enum TSLogType {
   TSLogTypeParse,
@@ -151,6 +174,30 @@ typedef enum TSQueryError {
   TSQueryErrorLanguage,
 } TSQueryError;
 
+typedef struct TSQueryCursorState {
+  void *payload;
+  uint32_t current_byte_offset;
+} TSQueryCursorState;
+
+typedef struct TSQueryCursorOptions {
+  void *payload;
+  bool (*progress_callback)(TSQueryCursorState *state);
+} TSQueryCursorOptions;
+
+/**
+ * The metadata associated with a language.
+ *
+ * Currently, this metadata can be used to check the [Semantic Version](https://semver.org/)
+ * of the language. This version information should be used to signal if a given parser might
+ * be incompatible with existing queries when upgrading between major versions, or minor versions
+ * if it's in zerover.
+ */
+typedef struct TSLanguageMetadata {
+  uint8_t major_version;
+  uint8_t minor_version;
+  uint8_t patch_version;
+} TSLanguageMetadata;
+
 /********************/
 /* Section - Parser */
 /********************/
@@ -176,7 +223,7 @@ const TSLanguage *ts_parser_language(const TSParser *self);
  * Returns a boolean indicating whether or not the language was successfully
  * assigned. True means assignment succeeded. False means there was a version
  * mismatch: the language was generated with an incompatible version of the
- * Tree-sitter CLI. Check the language's version using [`ts_language_version`]
+ * Tree-sitter CLI. Check the language's ABI version using [`ts_language_abi_version`]
  * and compare it to this library's [`TREE_SITTER_LANGUAGE_VERSION`] and
  * [`TREE_SITTER_MIN_COMPATIBLE_LANGUAGE_VERSION`] constants.
  */
@@ -247,7 +294,7 @@ const TSRange *ts_parser_included_ranges(
  *    `TSInputEncodingUTF8` or `TSInputEncodingUTF16`.
  *
  * This function returns a syntax tree on success, and `NULL` on failure. There
- * are three possible reasons for failure:
+ * are four possible reasons for failure:
  * 1. The parser does not have a language assigned. Check for this using the
       [`ts_parser_language`] function.
  * 2. Parsing was cancelled due to a timeout that was set by an earlier call to
@@ -259,6 +306,8 @@ const TSRange *ts_parser_included_ranges(
  *    earlier call to [`ts_parser_set_cancellation_flag`]. You can resume parsing
  *    from where the parser left out by calling [`ts_parser_parse`] again with
  *    the same arguments.
+ * 4. Parsing was cancelled due to the progress callback returning true. This callback
+ *    is passed in [`ts_parser_parse_with_options`] inside the [`TSParseOptions`] struct.
  *
  * [`read`]: TSInput::read
  * [`payload`]: TSInput::payload
@@ -269,6 +318,20 @@ TSTree *ts_parser_parse(
   TSParser *self,
   const TSTree *old_tree,
   TSInput input
+);
+
+/**
+ * Use the parser to parse some source code and create a syntax tree, with some options.
+ *
+ * See [`ts_parser_parse`] for more details.
+ *
+ * See [`TSParseOptions`] for more details on the options.
+ */
+TSTree* ts_parser_parse_with_options(
+  TSParser *self,
+  const TSTree *old_tree,
+  TSInput input,
+  TSParseOptions parse_options
 );
 
 /**
@@ -310,6 +373,8 @@ TSTree *ts_parser_parse_string_encoding(
 void ts_parser_reset(TSParser *self);
 
 /**
+ * @deprecated use [`ts_parser_parse_with_options`] and pass in a callback instead, this will be removed in 0.26.
+ *
  * Set the maximum duration in microseconds that parsing should be allowed to
  * take before halting.
  *
@@ -319,11 +384,15 @@ void ts_parser_reset(TSParser *self);
 void ts_parser_set_timeout_micros(TSParser *self, uint64_t timeout_micros);
 
 /**
+ * @deprecated use [`ts_parser_parse_with_options`] and pass in a callback instead, this will be removed in 0.26.
+ *
  * Get the duration in microseconds that parsing is allowed to take.
  */
 uint64_t ts_parser_timeout_micros(const TSParser *self);
 
 /**
+ * @deprecated use [`ts_parser_parse_with_options`] and pass in a callback instead, this will be removed in 0.26.
+ *
  * Set the parser's current cancellation flag pointer.
  *
  * If a non-null pointer is assigned, then the parser will periodically read
@@ -333,6 +402,8 @@ uint64_t ts_parser_timeout_micros(const TSParser *self);
 void ts_parser_set_cancellation_flag(TSParser *self, const size_t *flag);
 
 /**
+ * @deprecated use [`ts_parser_parse_with_options`] and pass in a callback instead, this will be removed in 0.26.
+ *
  * Get the parser's current cancellation flag pointer.
  */
 const size_t *ts_parser_cancellation_flag(const TSParser *self);
@@ -421,6 +492,13 @@ void ts_tree_edit(TSTree *self, const TSInputEdit *edit);
  * this function right after calling one of the [`ts_parser_parse`] functions.
  * You need to pass the old tree that was passed to parse, as well as the new
  * tree that was returned from that function.
+ *
+ * The returned ranges indicate areas where the hierarchical structure of syntax
+ * nodes (from root to leaf) has changed between the old and new trees. Characters
+ * outside these ranges have identical ancestor nodes in both trees.
+ *
+ * Note that the returned ranges may be slightly larger than the exact changed areas,
+ * but Tree-sitter attempts to make them as small as possible.
  *
  * The returned array is allocated using `malloc` and the caller is responsible
  * for freeing it using `free`. The length of the array will be written to the
@@ -550,25 +628,15 @@ TSStateId ts_node_next_parse_state(TSNode self);
 
 /**
  * Get the node's immediate parent.
- * Prefer [`ts_node_child_containing_descendant`] for
+ * Prefer [`ts_node_child_with_descendant`] for
  * iterating over the node's ancestors.
  */
 TSNode ts_node_parent(TSNode self);
 
 /**
- * @deprecated use [`ts_node_contains_descendant`] instead, this will be removed in 0.25
- *
- * Get the node's child containing `descendant`. This will not return
- * the descendant if it is a direct child of `self`, for that use
- * `ts_node_contains_descendant`.
- */
-TSNode ts_node_child_containing_descendant(TSNode self, TSNode descendant);
-
-/**
  * Get the node that contains `descendant`.
  *
- * Note that this can return `descendant` itself, unlike the deprecated function
- * [`ts_node_child_containing_descendant`].
+ * Note that this can return `descendant` itself.
  */
 TSNode ts_node_child_with_descendant(TSNode self, TSNode descendant);
 
@@ -639,12 +707,12 @@ TSNode ts_node_next_named_sibling(TSNode self);
 TSNode ts_node_prev_named_sibling(TSNode self);
 
 /**
- * Get the node's first child that extends beyond the given byte offset.
+ * Get the node's first child that contains or starts after the given byte offset.
  */
 TSNode ts_node_first_child_for_byte(TSNode self, uint32_t byte);
 
 /**
- * Get the node's first named child that extends beyond the given byte offset.
+ * Get the node's first named child that contains or starts after the given byte offset.
  */
 TSNode ts_node_first_named_child_for_byte(TSNode self, uint32_t byte);
 
@@ -693,6 +761,9 @@ bool ts_node_eq(TSNode self, TSNode other);
  * A tree cursor allows you to walk a syntax tree more efficiently than is
  * possible using the [`TSNode`] functions. It is a mutable object that is always
  * on a certain syntax node, and can be moved imperatively to different nodes.
+ *
+ * Note that the given node is considered the root of the cursor,
+ * and the cursor cannot walk outside this node.
  */
 TSTreeCursor ts_tree_cursor_new(TSNode node);
 
@@ -741,6 +812,9 @@ TSFieldId ts_tree_cursor_current_field_id(const TSTreeCursor *self);
  *
  * This returns `true` if the cursor successfully moved, and returns `false`
  * if there was no parent node (the cursor was already on the root node).
+ *
+ * Note that the node the cursor was constructed with is considered the root
+ * of the cursor, and the cursor cannot walk outside this node.
  */
 bool ts_tree_cursor_goto_parent(TSTreeCursor *self);
 
@@ -749,6 +823,9 @@ bool ts_tree_cursor_goto_parent(TSTreeCursor *self);
  *
  * This returns `true` if the cursor successfully moved, and returns `false`
  * if there was no next sibling node.
+ *
+ * Note that the node the cursor was constructed with is considered the root
+ * of the cursor, and the cursor cannot walk outside this node.
  */
 bool ts_tree_cursor_goto_next_sibling(TSTreeCursor *self);
 
@@ -760,8 +837,10 @@ bool ts_tree_cursor_goto_next_sibling(TSTreeCursor *self);
  *
  * Note, that this function may be slower than
  * [`ts_tree_cursor_goto_next_sibling`] due to how node positions are stored. In
- * the worst case, this will need to iterate through all the children upto the
- * previous sibling node to recalculate its position.
+ * the worst case, this will need to iterate through all the children up to the
+ * previous sibling node to recalculate its position. Also note that the node the cursor
+ * was constructed with is considered the root of the cursor, and the cursor cannot
+ * walk outside this node.
  */
 bool ts_tree_cursor_goto_previous_sibling(TSTreeCursor *self);
 
@@ -805,7 +884,7 @@ uint32_t ts_tree_cursor_current_descendant_index(const TSTreeCursor *self);
 uint32_t ts_tree_cursor_current_depth(const TSTreeCursor *self);
 
 /**
- * Move the cursor to the first child of its current node that extends beyond
+ * Move the cursor to the first child of its current node that contains or starts after
  * the given byte offset or point.
  *
  * This returns the index of the child node if one was found, and returns -1
@@ -989,6 +1068,16 @@ void ts_query_cursor_delete(TSQueryCursor *self);
 void ts_query_cursor_exec(TSQueryCursor *self, const TSQuery *query, TSNode node);
 
 /**
+ * Start running a given query on a given node, with some options.
+ */
+void ts_query_cursor_exec_with_options(
+  TSQueryCursor *self,
+  const TSQuery *query,
+  TSNode node,
+  const TSQueryCursorOptions *query_options
+);
+
+/**
  * Manage the maximum number of in-progress matches allowed by this query
  * cursor.
  *
@@ -1004,6 +1093,8 @@ uint32_t ts_query_cursor_match_limit(const TSQueryCursor *self);
 void ts_query_cursor_set_match_limit(TSQueryCursor *self, uint32_t limit);
 
 /**
+ * @deprecated use [`ts_query_cursor_exec_with_options`] and pass in a callback instead, this will be removed in 0.26.
+ *
  * Set the maximum duration in microseconds that query execution should be allowed to
  * take before halting.
  *
@@ -1013,6 +1104,8 @@ void ts_query_cursor_set_match_limit(TSQueryCursor *self, uint32_t limit);
 void ts_query_cursor_set_timeout_micros(TSQueryCursor *self, uint64_t timeout_micros);
 
 /**
+ * @deprecated use [`ts_query_cursor_exec_with_options`] and pass in a callback instead, this will be removed in 0.26.
+ *
  * Get the duration in microseconds that query execution is allowed to take.
  *
  * This is set via [`ts_query_cursor_set_timeout_micros`].
@@ -1020,11 +1113,38 @@ void ts_query_cursor_set_timeout_micros(TSQueryCursor *self, uint64_t timeout_mi
 uint64_t ts_query_cursor_timeout_micros(const TSQueryCursor *self);
 
 /**
- * Set the range of bytes or (row, column) positions in which the query
- * will be executed.
+ * Set the range of bytes in which the query will be executed.
+ *
+ * The query cursor will return matches that intersect with the given point range.
+ * This means that a match may be returned even if some of its captures fall
+ * outside the specified range, as long as at least part of the match
+ * overlaps with the range.
+ *
+ * For example, if a query pattern matches a node that spans a larger area
+ * than the specified range, but part of that node intersects with the range,
+ * the entire match will be returned.
+ *
+ * This will return `false` if the start byte is greater than the end byte, otherwise
+ * it will return `true`.
  */
-void ts_query_cursor_set_byte_range(TSQueryCursor *self, uint32_t start_byte, uint32_t end_byte);
-void ts_query_cursor_set_point_range(TSQueryCursor *self, TSPoint start_point, TSPoint end_point);
+bool ts_query_cursor_set_byte_range(TSQueryCursor *self, uint32_t start_byte, uint32_t end_byte);
+
+/**
+ * Set the range of (row, column) positions in which the query will be executed.
+ *
+ * The query cursor will return matches that intersect with the given point range.
+ * This means that a match may be returned even if some of its captures fall
+ * outside the specified range, as long as at least part of the match
+ * overlaps with the range.
+ *
+ * For example, if a query pattern matches a node that spans a larger area
+ * than the specified range, but part of that node intersects with the range,
+ * the entire match will be returned.
+ *
+ * This will return `false` if the start point is greater than the end point, otherwise
+ * it will return `true`.
+ */
+bool ts_query_cursor_set_point_range(TSQueryCursor *self, TSPoint start_point, TSPoint end_point);
 
 /**
  * Advance to the next match of the currently running query.
@@ -1039,7 +1159,7 @@ void ts_query_cursor_remove_match(TSQueryCursor *self, uint32_t match_id);
  * Advance to the next capture of the currently running query.
  *
  * If there is a capture, write its match to `*match` and its index within
- * the matche's capture list to `*capture_index`. Otherwise, return `false`.
+ * the match's capture list to `*capture_index`. Otherwise, return `false`.
  */
 bool ts_query_cursor_next_capture(
   TSQueryCursor *self,
@@ -1089,11 +1209,6 @@ uint32_t ts_language_symbol_count(const TSLanguage *self);
 uint32_t ts_language_state_count(const TSLanguage *self);
 
 /**
- * Get a node type string for the given numerical id.
- */
-const char *ts_language_symbol_name(const TSLanguage *self, TSSymbol symbol);
-
-/**
  * Get the numerical id for the given node type string.
  */
 TSSymbol ts_language_symbol_for_name(
@@ -1119,6 +1234,27 @@ const char *ts_language_field_name_for_id(const TSLanguage *self, TSFieldId id);
 TSFieldId ts_language_field_id_for_name(const TSLanguage *self, const char *name, uint32_t name_length);
 
 /**
+ * Get a list of all supertype symbols for the language.
+*/
+const TSSymbol *ts_language_supertypes(const TSLanguage *self, uint32_t *length);
+
+/**
+ * Get a list of all subtype symbol ids for a given supertype symbol.
+ *
+ * See [`ts_language_supertypes`] for fetching all supertype symbols.
+ */
+const TSSymbol *ts_language_subtypes(
+  const TSLanguage *self,
+  TSSymbol supertype,
+  uint32_t *length
+);
+
+/**
+ * Get a node type string for the given numerical id.
+ */
+const char *ts_language_symbol_name(const TSLanguage *self, TSSymbol symbol);
+
+/**
  * Check whether the given node type id belongs to named nodes, anonymous nodes,
  * or a hidden nodes.
  *
@@ -1127,6 +1263,8 @@ TSFieldId ts_language_field_id_for_name(const TSLanguage *self, const char *name
 TSSymbolType ts_language_symbol_type(const TSLanguage *self, TSSymbol symbol);
 
 /**
+ * @deprecated use [`ts_language_abi_version`] instead, this will be removed in 0.26.
+ *
  * Get the ABI version number for this language. This version number is used
  * to ensure that languages were generated by a compatible version of
  * Tree-sitter.
@@ -1136,11 +1274,34 @@ TSSymbolType ts_language_symbol_type(const TSLanguage *self, TSSymbol symbol);
 uint32_t ts_language_version(const TSLanguage *self);
 
 /**
+ * Get the ABI version number for this language. This version number is used
+ * to ensure that languages were generated by a compatible version of
+ * Tree-sitter.
+ *
+ * See also [`ts_parser_set_language`].
+ */
+uint32_t ts_language_abi_version(const TSLanguage *self);
+
+/**
+ * Get the metadata for this language. This information is generated by the
+ * CLI, and relies on the language author providing the correct metadata in
+ * the language's `tree-sitter.json` file.
+ *
+ * See also [`TSMetadata`].
+ */
+const TSLanguageMetadata *ts_language_metadata(const TSLanguage *self);
+
+/**
  * Get the next parse state. Combine this with lookahead iterators to generate
  * completion suggestions or valid symbols in error nodes. Use
  * [`ts_node_grammar_symbol`] for valid symbols.
 */
 TSStateId ts_language_next_state(const TSLanguage *self, TSStateId state, TSSymbol symbol);
+
+/**
+ * Get the name of this language. This returns `NULL` in older parsers.
+ */
+const char *ts_language_name(const TSLanguage *self);
 
 /********************************/
 /* Section - Lookahead Iterator */
