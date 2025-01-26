@@ -20,6 +20,10 @@ jobs:
 
       - name: Update submodule & Verify no changes
         run: |
+          cd tree-sitter
+          git fetch
+          git checkout release-0.25
+          cd ..
           git submodule update --remote
           git diff --exit-code || echo "Changes found"
 
