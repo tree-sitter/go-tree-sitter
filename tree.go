@@ -60,6 +60,13 @@ func (t *Tree) Walk() *TreeCursor {
 // call this method right after calling one of the [Parser.parse]
 // functions. Call it on the old tree that was passed to parse, and
 // pass the new tree that was returned from `parse`.
+//
+// The returned ranges indicate areas where the hierarchical structure of syntax
+// nodes (from root to leaf) has changed between the old and new trees. Characters
+// outside these ranges have identical ancestor nodes in both trees.
+//
+// Note that the returned ranges may be slightly larger than the exact changed areas,
+// but Tree-sitter attempts to make them as small as possible.
 func (t *Tree) ChangedRanges(other *Tree) []Range {
 	var count C.uint
 	ptr := C.ts_tree_get_changed_ranges(t._inner, other._inner, &count)

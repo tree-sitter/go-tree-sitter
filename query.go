@@ -3,6 +3,8 @@ package tree_sitter
 /*
 #cgo CFLAGS: -Iinclude -Isrc -std=c11 -D_POSIX_C_SOURCE=200112L -D_DEFAULT_SOURCE
 #include <tree_sitter/api.h>
+
+extern bool queryProgressCallback(TSQueryCursorState *state);
 */
 import "C"
 
@@ -13,6 +15,8 @@ import (
 	"regexp"
 	"strings"
 	"unsafe"
+
+	"github.com/mattn/go-pointer"
 )
 
 type Query struct {
@@ -35,10 +39,6 @@ const (
 	CaptureQuantifierOneOrMore
 )
 
-func (q *Query) Language() *C.TSLanguage {
-	return q._inner.language
-}
-
 func newCaptureQuantifier(raw C.TSQuantifier) CaptureQuantifier {
 	switch raw {
 	case C.TSQuantifierZero:
@@ -59,6 +59,23 @@ func newCaptureQuantifier(raw C.TSQuantifier) CaptureQuantifier {
 // A stateful object for executing a [Query] on a syntax [Tree].
 type QueryCursor struct {
 	_inner *C.TSQueryCursor
+}
+
+// A stateful object that is passed into the progress callback [QueryOptions.ProgressCallback].
+// to provide the current state of the query.
+type QueryCursorState struct {
+	// The byte offset in the document that the query is at.
+	CurrentByteOffset uint32
+}
+
+// Options for query execution
+type QueryCursorOptions struct {
+	// A function that will be called periodically during the execution of the query to check
+	// if query execution should be cancelled. If the progress callback returns `true`, then
+	// query execution will be canceled. You can also use this to instrument query execution
+	// and check where the query is at in the document. The progress callback takes a single
+	// argument, which is a [QueryCursorState] representing the current state of the query.
+	ProgressCallback func(QueryCursorState) bool
 }
 
 // A key-value pair associated with a particular pattern in a [Query].
@@ -204,7 +221,7 @@ func NewQuery(language *Language, source string) (*Query, *QueryError) {
 	if ptr == nil {
 		if errorType == C.TSQueryErrorLanguage {
 			lErr := &LanguageError{
-				version: language.Version(),
+				version: language.AbiVersion(),
 			}
 			return nil, &QueryError{
 				Row:     0,
@@ -236,13 +253,32 @@ func NewQuery(language *Language, source string) (*Query, *QueryError) {
 		// Error types that report names
 		case C.TSQueryErrorNodeType, C.TSQueryErrorField, C.TSQueryErrorCapture:
 			suffix := string(bytes[offset:])
+			inQuotes := offset > 0 && bytes[offset-1] == '"'
 			endOffset := len(suffix)
-			for i, c := range suffix {
-				if !strings.ContainsRune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-", c) {
-					endOffset = i
-					break
+			backslashes := 0
+
+			if inQuotes {
+				// Handle quoted strings
+				for i, c := range suffix {
+					if c == '"' && backslashes%2 == 0 {
+						endOffset = i
+						break
+					} else if c == '\\' {
+						backslashes++
+					} else {
+						backslashes = 0
+					}
+				}
+			} else {
+				// Handle unquoted strings
+				for i, c := range suffix {
+					if !strings.ContainsRune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-", c) {
+						endOffset = i
+						break
+					}
 				}
 			}
+
 			message = suffix[:endOffset]
 			switch errorType {
 			case C.TSQueryErrorNodeType:
@@ -731,6 +767,47 @@ func (qc *QueryCursor) Matches(query *Query, node *Node, text []byte) QueryMatch
 	return qm
 }
 
+// This C function is passed to Tree-sitter as the progress callback.
+//
+//export queryProgressCallback
+func queryProgressCallback(state *C.TSQueryCursorState) C.bool {
+	payload := pointer.Restore(state.payload).(*QueryCursorOptions)
+	return C.bool(payload.ProgressCallback(QueryCursorState{
+		CurrentByteOffset: uint32(state.current_byte_offset),
+	}))
+}
+
+// Iterate over all of the matches in the order that they were found, with options.
+//
+// Each match contains the index of the pattern that matched, and a list of
+// captures. Because multiple patterns can match the same set of nodes,
+// one match may contain captures that appear *before* some of the
+// captures from a previous match.
+func (qc *QueryCursor) MatchesWithOptions(query *Query, node *Node, text []byte, options QueryCursorOptions) QueryMatches {
+	cOptions := &C.TSQueryCursorOptions{
+		payload:           pointer.Save(&options),
+		progress_callback: (*[0]byte)(C.queryProgressCallback),
+	}
+
+	C.ts_query_cursor_exec_with_options(qc._inner, query._inner, node._inner, cOptions)
+
+	qm := QueryMatches{
+		_inner:  qc._inner,
+		query:   query,
+		text:    text,
+		buffer1: []byte{},
+		buffer2: []byte{},
+	}
+	if qm._inner != qc._inner {
+		panic("inner pointers of `QueryCursor` and `QueryMatches` are not equal")
+	}
+	if qm.query != query {
+		panic("query pointers of `QueryCursor` and `QueryMatches` are not equal")
+	}
+
+	return qm
+}
+
 // Iterate over all of the individual captures in the order that they
 // appear.
 //
@@ -747,15 +824,35 @@ func (qc *QueryCursor) Captures(query *Query, node *Node, text []byte) QueryCapt
 	}
 }
 
-// Set the range in which the query will be executed, in terms of byte
-// offsets.
+// Set the range of bytes in which the query will be executed.
+//
+// The query cursor will return matches that intersect with the given point range.
+// This means that a match may be returned even if some of its captures fall
+// outside the specified range, as long as at least part of the match
+// overlaps with the range.
+//
+// For example, if a query pattern matches a node that spans a larger area
+// than the specified range, but part of that node intersects with the range,
+// the entire match will be returned.
+//
+// This will have no effect if the start byte is greater than the end byte.
 func (qc *QueryCursor) SetByteRange(startByte uint, endByte uint) *QueryCursor {
 	C.ts_query_cursor_set_byte_range(qc._inner, C.uint32_t(startByte), C.uint32_t(endByte))
 	return qc
 }
 
-// Set the range in which the query will be executed, in terms of rows and
-// columns.
+// Set the range of (row, column) positions in which the query will be executed.
+//
+// The query cursor will return matches that intersect with the given point range.
+// This means that a match may be returned even if some of its captures fall
+// outside the specified range, as long as at least part of the match
+// overlaps with the range.
+//
+// For example, if a query pattern matches a node that spans a larger area
+// than the specified range, but part of that node intersects with the range,
+// the entire match will be returned.
+//
+// This will have no effect if the start point is greater than the end point.
 func (qc *QueryCursor) SetPointRange(startPoint Point, endPoint Point) *QueryCursor {
 	C.ts_query_cursor_set_point_range(qc._inner, startPoint.toTSPoint(), endPoint.toTSPoint())
 	return qc

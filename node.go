@@ -285,23 +285,14 @@ func (n *Node) ChildrenByFieldName(fieldName string, cursor *TreeCursor) []Node 
 }
 
 // Get this node's immediate parent.
-// Prefer [Node.ChildContainingDescendant]
+// Prefer [Node.ChildWithDescendant]
 // for iterating over this node's ancestors.
 func (n *Node) Parent() *Node {
 	return newNode(C.ts_node_parent(n._inner))
 }
 
-// Deprecated: Prefer [Node.ChildWithDescendant] instead, this will be removed in 0.25
-// Get the node's child containing `descendant`. This will not return
-// the descendant if it is a direct child of `self`, for that use
-// [Node.ChildWithDescendant].
-func (n *Node) ChildContainingDescendant(descendant *Node) *Node {
-	return newNode(C.ts_node_child_containing_descendant(n._inner, descendant._inner))
-}
-
 // Get the node that contains `descendant`.
-// Note that this can return `descendant` itself, unlike the deprecated function
-// [Node.ChildContainingDescendant].
+// Note that this can return `descendant` itself.
 func (n *Node) ChildWithDescendant(descendant *Node) *Node {
 	return newNode(C.ts_node_child_with_descendant(n._inner, descendant._inner))
 }
@@ -326,12 +317,12 @@ func (n *Node) PrevNamedSibling() *Node {
 	return newNode(C.ts_node_prev_named_sibling(n._inner))
 }
 
-// Get the node's first child that extends beyond the given byte offset.
+// Get the node's first child that contains or starts after the given byte offset.
 func (n *Node) FirstChildForByte(byteOffset uint) *Node {
 	return newNode(C.ts_node_first_child_for_byte(n._inner, C.uint(byteOffset)))
 }
 
-// Get the node's first named child that extends beyond the given byte offset.
+// Get the node's first named child that contains or starts after the given byte offset.
 func (n *Node) FirstNamedChildForByte(byteOffset uint) *Node {
 	return newNode(C.ts_node_first_named_child_for_byte(n._inner, C.uint(byteOffset)))
 }
@@ -377,6 +368,9 @@ func (n *Node) Utf16Text(source []uint16) []uint16 {
 }
 
 // Create a new [TreeCursor] starting from this node.
+//
+// Note that the given node is considered the root of the cursor,
+// and the cursor cannot walk outside this node.
 func (n *Node) Walk() *TreeCursor {
 	return newTreeCursor(*n)
 }

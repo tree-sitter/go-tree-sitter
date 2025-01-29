@@ -273,8 +273,38 @@ func TestParentOfZeroWithNode(t *testing.T) {
 	assert.Equal(t, "function_definition", blockParent.Kind())
 	assert.Equal(t, "(function_definition name: (identifier) parameters: (parameters (identifier)) body: (block))", blockParent.ToSexp())
 
-	assert.Equal(t, functionDefinition, root.ChildContainingDescendant(block))
-	assert.Nil(t, functionDefinition.ChildContainingDescendant(block))
+	assert.Equal(t, functionDefinition, root.ChildWithDescendant(block))
+	assert.Equal(t, block, functionDefinition.ChildWithDescendant(block))
+	assert.Nil(t, block.ChildWithDescendant(block))
+}
+
+func TestFirstChildForOffset(t *testing.T) {
+	parser := NewParser()
+	defer parser.Close()
+	parser.SetLanguage(getLanguage("javascript"))
+	tree := parser.Parse([]byte("x10 + 100"), nil)
+	defer tree.Close()
+
+	sumNode := tree.RootNode().Child(0).Child(0)
+
+	assert.Equal(t, "identifier", sumNode.FirstChildForByte(0).Kind())
+	assert.Equal(t, "identifier", sumNode.FirstChildForByte(1).Kind())
+	assert.Equal(t, "+", sumNode.FirstChildForByte(3).Kind())
+	assert.Equal(t, "number", sumNode.FirstChildForByte(5).Kind())
+}
+
+func TestFirstNamedChildForOffset(t *testing.T) {
+	parser := NewParser()
+	defer parser.Close()
+	parser.SetLanguage(getLanguage("javascript"))
+	tree := parser.Parse([]byte("x10 + 100"), nil)
+	defer tree.Close()
+
+	sumNode := tree.RootNode().Child(0).Child(0)
+
+	assert.Equal(t, "identifier", sumNode.FirstNamedChildForByte(0).Kind())
+	assert.Equal(t, "identifier", sumNode.FirstNamedChildForByte(1).Kind())
+	assert.Equal(t, "number", sumNode.FirstNamedChildForByte(3).Kind())
 }
 
 func TestNodeFieldNameForChild(t *testing.T) {
@@ -406,10 +436,11 @@ func TestNodeNamedChild(t *testing.T) {
 	assert.Equal(t, tree.RootNode(), arrayNode.Parent())
 	assert.Nil(t, tree.RootNode().Parent())
 
-	assert.Equal(t, arrayNode, tree.RootNode().ChildContainingDescendant(nullNode))
-	assert.Equal(t, objectNode, arrayNode.ChildContainingDescendant(nullNode))
-	assert.Equal(t, pairNode, objectNode.ChildContainingDescendant(nullNode))
-	assert.Nil(t, pairNode.ChildContainingDescendant(nullNode))
+	assert.Equal(t, arrayNode, tree.RootNode().ChildWithDescendant(nullNode))
+	assert.Equal(t, objectNode, arrayNode.ChildWithDescendant(nullNode))
+	assert.Equal(t, pairNode, objectNode.ChildWithDescendant(nullNode))
+	assert.Equal(t, nullNode, pairNode.ChildWithDescendant(nullNode))
+	assert.Nil(t, nullNode.ChildWithDescendant(nullNode))
 }
 
 func TestNodeDescendantCount(t *testing.T) {
@@ -550,6 +581,10 @@ func TestNodeDescendantForRange(t *testing.T) {
 	assert.EqualValues(t, stringIndex+9, pairNode.EndByte())
 	assert.Equal(t, Point{6, 4}, pairNode.StartPosition())
 	assert.Equal(t, Point{6, 13}, pairNode.EndPosition())
+
+	// Negative test, start > end
+	assert.Nil(t, arrayNode.DescendantForByteRange(1, 0))
+	assert.Nil(t, arrayNode.DescendantForPointRange(Point{6, 8}, Point{6, 7}))
 }
 
 func TestNodeEdit(t *testing.T) {
@@ -624,6 +659,22 @@ func TestNodeIsExtra(t *testing.T) {
 	assert.True(t, commentNode.IsExtra())
 }
 
+func TestNodeIsError(t *testing.T) {
+	parser := NewParser()
+	defer parser.Close()
+	parser.SetLanguage(getLanguage("javascript"))
+	tree := parser.Parse([]byte("foo("), nil)
+	defer tree.Close()
+
+	rootNode := tree.RootNode()
+	assert.Equal(t, "program", rootNode.Kind())
+	assert.True(t, rootNode.HasError())
+
+	child := rootNode.Child(0)
+	assert.Equal(t, "ERROR", child.Kind())
+	assert.True(t, child.IsError())
+}
+
 func TestNodeSexp(t *testing.T) {
 	parser := NewParser()
 	defer parser.Close()
@@ -693,6 +744,29 @@ func TestNodeNumericSymbolsRespectSimpleAliases(t *testing.T) {
 	binaryMinusNode := binaryNode.ChildByFieldName("operator")
 	assert.Equal(t, "-", binaryMinusNode.Kind())
 	assert.Equal(t, unaryMinusNode.KindId(), binaryMinusNode.KindId())
+}
+
+func TestHiddenZeroWidthNodeWithVisibleChild(t *testing.T) {
+	code := `
+class Foo {
+  std::
+private:
+  std::string s;
+};
+	`
+
+	parser := NewParser()
+	defer parser.Close()
+	parser.SetLanguage(getLanguage("cpp"))
+	tree := parser.Parse([]byte(code), nil)
+	defer tree.Close()
+	root := tree.RootNode()
+
+	classSpecifier := root.Child(0)
+	fieldDeclList := classSpecifier.ChildByFieldName("body")
+	fieldDecl := fieldDeclList.NamedChild(0)
+	fieldIdent := fieldDecl.ChildByFieldName("declarator")
+	assert.Equal(t, fieldIdent, fieldDecl.ChildWithDescendant(fieldIdent))
 }
 
 func getAllNodes(tree *Tree) []*Node {
