@@ -89,7 +89,7 @@ func ExampleParser_Parse() {
 	// (source_file (package_clause (package_identifier)) (function_declaration name: (identifier) parameters: (parameter_list) body: (block (return_statement))))
 }
 
-func ExampleParser_ParseWith() {
+func ExampleParser_ParseWithOptions() {
 	parser := NewParser()
 	defer parser.Close()
 
@@ -109,7 +109,7 @@ func ExampleParser_ParseWith() {
 		return sourceCode[offset:]
 	}
 
-	tree := parser.ParseWith(readCallback, nil)
+	tree := parser.ParseWithOptions(readCallback, nil, nil)
 	defer tree.Close()
 
 	rootNode := tree.RootNode()
@@ -214,7 +214,7 @@ func TestParsingWithCustomUTF8Input(t *testing.T) {
 
 	lines := []string{"pub fn foo() {", "  1", "}"}
 
-	tree := parser.ParseWith(func(_ int, position Point) []byte {
+	tree := parser.ParseWithOptions(func(_ int, position Point) []byte {
 		row := position.Row
 		column := position.Column
 		if row < uint(len(lines)) {
@@ -226,7 +226,7 @@ func TestParsingWithCustomUTF8Input(t *testing.T) {
 		} else {
 			return []byte{}
 		}
-	}, nil)
+	}, nil, nil)
 
 	root := tree.RootNode()
 	assert.Equal(t, root.ToSexp(), "(source_file (function_item (visibility_modifier) name: (identifier) parameters: (parameters) body: (block (integer_literal))))")
@@ -248,7 +248,7 @@ func TestParsingWithCustomUTF16LEInput(t *testing.T) {
 
 	newline := []uint16{binary.LittleEndian.Uint16([]byte{'\n', 0})}
 
-	tree := parser.ParseUTF16LEWith(func(_ int, position Point) []uint16 {
+	tree := parser.ParseUTF16LEWithOptions(func(_ int, position Point) []uint16 {
 		row := position.Row
 		column := position.Column
 		if row < uint(len(lines)) {
@@ -260,7 +260,7 @@ func TestParsingWithCustomUTF16LEInput(t *testing.T) {
 		} else {
 			return []uint16{}
 		}
-	}, nil)
+	}, nil, nil)
 
 	root := tree.RootNode()
 	assert.Equal(t, root.ToSexp(), "(source_file (function_item (visibility_modifier) name: (identifier) parameters: (parameters) body: (block (integer_literal))))")
@@ -293,7 +293,7 @@ func TestParsingWithCustomUTF16BEInput(t *testing.T) {
 
 	newline := []uint16{binary.BigEndian.Uint16([]byte{'\n', 0})}
 
-	tree := parser.ParseUTF16BEWith(func(_ int, position Point) []uint16 {
+	tree := parser.ParseUTF16BEWithOptions(func(_ int, position Point) []uint16 {
 		row := position.Row
 		column := position.Column
 		if row < uint(len(lines)) {
@@ -305,7 +305,7 @@ func TestParsingWithCustomUTF16BEInput(t *testing.T) {
 		} else {
 			return []uint16{}
 		}
-	}, nil)
+	}, nil, nil)
 
 	root := tree.RootNode()
 	assert.Equal(t, root.ToSexp(), "(source_file (function_item (visibility_modifier) name: (identifier) parameters: (parameters) body: (block (integer_literal))))")
@@ -321,9 +321,9 @@ func TestParsingWithCallbackReturningOwnedStrings(t *testing.T) {
 
 	text := []byte("pub fn foo() { 1 }")
 
-	tree := parser.ParseWith(func(i int, _ Point) []byte {
+	tree := parser.ParseWithOptions(func(i int, _ Point) []byte {
 		return text[i:]
-	}, nil)
+	}, nil, nil)
 
 	root := tree.RootNode()
 	assert.Equal(t, root.ToSexp(), "(source_file (function_item (visibility_modifier) name: (identifier) parameters: (parameters) body: (block (integer_literal))))")
@@ -397,13 +397,13 @@ func TestParsingEndsWhenInputCallbackReturnsEmpty(t *testing.T) {
 	parser.SetLanguage(getLanguage("javascript"))
 
 	source := []byte("abcdefghijklmnoqrs")
-	tree := parser.ParseWith(func(offset int, _ Point) []byte {
+	tree := parser.ParseWithOptions(func(offset int, _ Point) []byte {
 		if offset >= 6 {
 			return []byte{}
 		} else {
 			return source[offset:int(math.Min(float64(len(source)), float64(offset+3)))]
 		}
-	}, nil)
+	}, nil, nil)
 
 	assert.Equal(t, tree.RootNode().EndByte(), uint(6))
 }
@@ -436,9 +436,9 @@ func TestParsingAfterEditingBeginningOfCode(t *testing.T) {
 	)
 
 	recorder := newReadRecorder(code)
-	tree = parser.ParseWith(func(i int, _ Point) []byte {
+	tree = parser.ParseWithOptions(func(i int, _ Point) []byte {
 		return recorder.Read(i)
-	}, tree)
+	}, tree, nil)
 	assert.Equal(
 		t,
 		"(program (expression_statement (binary_expression "+
@@ -482,9 +482,9 @@ func TestParsingAfterEditingEndOfCode(t *testing.T) {
 	)
 
 	recorder := newReadRecorder(code)
-	tree = parser.ParseWith(func(i int, _ Point) []byte {
+	tree = parser.ParseWithOptions(func(i int, _ Point) []byte {
 		return recorder.Read(i)
-	}, tree)
+	}, tree, nil)
 	assert.Equal(
 		t,
 		"(program (expression_statement (binary_expression "+
@@ -607,21 +607,28 @@ func TestParsingCancelledByAnotherThread(t *testing.T) {
 	var cancellationFlag atomic.Value
 	flag := uintptr(0)
 	cancellationFlag.Store(&flag)
+	callback := func(ParseState) bool {
+		return atomic.LoadUintptr(cancellationFlag.Load().(*uintptr)) != 0
+	}
 
 	parser := NewParser()
 	defer parser.Close()
 	parser.SetLanguage(getLanguage("javascript"))
-	parser.SetCancellationFlag(cancellationFlag.Load().(*uintptr))
 
-	tree := parser.ParseWith(func(offset int, _ Point) []byte {
-		if offset == 0 {
-			return []byte(" [")
-		} else if offset >= 20000 {
-			return []byte{}
-		} else {
-			return []byte("0,")
-		}
-	}, nil)
+	// Long input - parsing succeeds
+	tree := parser.ParseWithOptions(
+		func(offset int, _ Point) []byte {
+			if offset == 0 {
+				return []byte(" [")
+			} else if offset >= 20000 {
+				return []byte{}
+			} else {
+				return []byte("0,")
+			}
+		},
+		nil,
+		&ParseOptions{ProgressCallback: callback},
+	)
 	assert.NotNil(t, tree)
 
 	cancelThread := make(chan struct{})
@@ -631,119 +638,307 @@ func TestParsingCancelledByAnotherThread(t *testing.T) {
 		close(cancelThread)
 	}()
 
-	tree = parser.ParseWith(func(offset int, _ Point) []byte {
-		runtime.Gosched()
-		time.Sleep(10 * time.Millisecond)
-		if offset == 0 {
-			return []byte(" [")
-		} else {
-			return []byte("0,")
-		}
-	}, nil)
+	// Infinite input
+	tree = parser.ParseWithOptions(
+		func(offset int, _ Point) []byte {
+			runtime.Gosched()
+			time.Sleep(10 * time.Millisecond)
+			if offset == 0 {
+				return []byte(" [")
+			} else {
+				return []byte("0,")
+			}
+		},
+		nil,
+		&ParseOptions{ProgressCallback: callback},
+	)
 
 	<-cancelThread
 	assert.Nil(t, tree)
 }
 
 func TestParsingWithTimeout(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping test on Windows due to millisecond timer resolution limitations")
+	}
+
 	parser := NewParser()
 	defer parser.Close()
 	parser.SetLanguage(getLanguage("json"))
 
 	// Parse an infinitely-long array, but pause after 1ms of processing.
-	parser.SetTimeoutMicros(1000)
 	startTime := time.Now()
-	tree := parser.ParseWith(func(offset int, _ Point) []byte {
-		if offset == 0 {
-			return []byte(" [")
-		} else {
-			return []byte(",0")
-		}
-	}, nil)
+	tree := parser.ParseWithOptions(
+		func(offset int, _ Point) []byte {
+			if offset == 0 {
+				return []byte(" [")
+			} else {
+				return []byte(",0")
+			}
+		},
+		nil,
+		&ParseOptions{ProgressCallback: func(ParseState) bool {
+			return time.Since(startTime) > 1000*time.Microsecond
+		}},
+	)
 	assert.Nil(t, tree)
 	assert.True(t, time.Since(startTime) < 2000*time.Microsecond)
 
-	// Continue parsing, but pause after 1 ms of processing.
-	parser.SetTimeoutMicros(5000)
+	// Continue parsing, but pause after 5 ms of processing.
 	startTime = time.Now()
-	tree = parser.ParseWith(func(offset int, _ Point) []byte {
-		if offset == 0 {
-			return []byte(" [")
-		} else {
-			return []byte(",0")
-		}
-	}, nil)
+	tree = parser.ParseWithOptions(
+		func(offset int, _ Point) []byte {
+			if offset == 0 {
+				return []byte(" [")
+			} else {
+				return []byte(",0")
+			}
+		},
+		nil,
+		&ParseOptions{ProgressCallback: func(ParseState) bool {
+			return time.Since(startTime) > 5000*time.Microsecond
+		}},
+	)
 	assert.Nil(t, tree)
 	assert.True(t, time.Since(startTime) > 100*time.Microsecond)
 	assert.True(t, time.Since(startTime) < 10000*time.Microsecond)
 
 	// Finish parsing
-	parser.SetTimeoutMicros(0)
-	tree = parser.ParseWith(func(offset int, _ Point) []byte {
-		if offset >= 5001 {
-			return []byte{}
-		} else if offset == 5000 {
-			return []byte("]")
-		} else {
-			return []byte(",0")
-		}
-	}, nil)
+	tree = parser.ParseWithOptions(
+		func(offset int, _ Point) []byte {
+			if offset >= 5001 {
+				return []byte{}
+			} else if offset == 5000 {
+				return []byte("]")
+			} else {
+				return []byte(",0")
+			}
+		},
+		nil,
+		nil,
+	)
 	assert.Equal(t, "array", tree.RootNode().Child(0).Kind())
 }
 
 func TestParsingWithTimeoutAndReset(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping test on Windows due to millisecond timer resolution limitations")
+	}
+
 	parser := NewParser()
 	defer parser.Close()
 	parser.SetLanguage(getLanguage("json"))
 
-	parser.SetTimeoutMicros(5)
-	tree := parser.Parse([]byte("[\"ok\", 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]"), nil)
+	start := time.Now()
+	code := []byte("[\"ok\", 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]")
+	callback := func(offset int, _ Point) []byte {
+		if offset >= len(code) {
+			return []byte{}
+		} else {
+			return code[offset:]
+		}
+	}
+	tree := parser.ParseWithOptions(
+		callback,
+		nil,
+		&ParseOptions{ProgressCallback: func(ParseState) bool {
+			return time.Since(start) > 2*time.Microsecond
+		}},
+	)
+
 	defer tree.Close()
 	assert.Nil(t, tree)
 
 	// Without calling reset, the parser continues from where it left off, so
 	// it does not see the changes to the beginning of the source code.
-	parser.SetTimeoutMicros(0)
-	tree = parser.Parse([]byte("[null, 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]"), tree)
+	code = []byte("[null, 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]")
+	tree = parser.ParseWithOptions(callback, nil, nil)
 	assert.Equal(t, "string", tree.RootNode().NamedChild(0).NamedChild(0).Kind())
 
-	parser.SetTimeoutMicros(5)
-	tree = parser.Parse([]byte("[\"ok\", 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]"), nil)
+	code = []byte("[\"ok\", 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]")
+	tree = parser.ParseWithOptions(
+		callback,
+		nil,
+		&ParseOptions{ProgressCallback: func(ParseState) bool {
+			return time.Since(start) > 2*time.Microsecond
+		}},
+	)
 	assert.Nil(t, tree)
 
 	// By calling reset, we force the parser to start over from scratch so
 	// that it sees the changes to the beginning of the source code.
-	parser.SetTimeoutMicros(0)
 	parser.Reset()
-	tree = parser.Parse([]byte("[null, 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]"), nil)
+	code = []byte("[null, 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]")
+	tree = parser.ParseWithOptions(callback, nil, nil)
 	assert.Equal(t, "null", tree.RootNode().NamedChild(0).NamedChild(0).Kind())
 }
 
 func TestParsingWithTimeoutAndImplicitReset(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping test on Windows due to millisecond timer resolution limitations")
+	}
+
 	parser := NewParser()
 	defer parser.Close()
 	parser.SetLanguage(getLanguage("javascript"))
 
-	parser.SetTimeoutMicros(5)
-	tree := parser.Parse([]byte("[\"ok\", 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]"), nil)
+	start := time.Now()
+	code := []byte("[\"ok\", 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]")
+	callback := func(offset int, _ Point) []byte {
+		if offset >= len(code) {
+			return []byte{}
+		} else {
+			return code[offset:]
+		}
+	}
+	tree := parser.ParseWithOptions(
+		callback,
+		nil,
+		&ParseOptions{ProgressCallback: func(ParseState) bool {
+			return time.Since(start) > 5*time.Microsecond
+		}},
+	)
 	defer tree.Close()
 	assert.Nil(t, tree)
 
 	// Changing the parser's language implicitly resets, discarding the previous partial parse.
 	parser.SetLanguage(getLanguage("json"))
-	parser.SetTimeoutMicros(0)
-	tree = parser.Parse([]byte("[null, 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]"), nil)
+	code = []byte("[null, 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]")
+	tree = parser.ParseWithOptions(callback, nil, nil)
 	assert.Equal(t, "null", tree.RootNode().NamedChild(0).NamedChild(0).Kind())
 }
 
 func TestParsingWithTimeoutAndNoCompletion(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping test on Windows due to millisecond timer resolution limitations")
+	}
+
 	parser := NewParser()
 	defer parser.Close()
 	parser.SetLanguage(getLanguage("javascript"))
 
-	parser.SetTimeoutMicros(5)
-	tree := parser.Parse([]byte("[\"ok\", 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]"), nil)
+	start := time.Now()
+	code := []byte("[\"ok\", 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]")
+	callback := func(offset int, _ Point) []byte {
+		if offset >= len(code) {
+			return []byte{}
+		} else {
+			return code[offset:]
+		}
+	}
+	tree := parser.ParseWithOptions(
+		callback,
+		nil,
+		&ParseOptions{ProgressCallback: func(ParseState) bool {
+			return time.Since(start) > 5*time.Microsecond
+		}},
+	)
 	defer tree.Close()
+	assert.Nil(t, tree)
+}
+
+func TestParsingWithTimeoutDuringBalancing(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping test on Windows due to millisecond timer resolution limitations")
+	}
+
+	parser := NewParser()
+	defer parser.Close()
+	parser.SetLanguage(getLanguage("javascript"))
+
+	functionCount := 100
+
+	code := strings.Repeat("function() {}\n", functionCount)
+	currentByteOffset := uint32(0)
+	inBalancing := false
+	tree := parser.ParseWithOptions(
+		func(offset int, _ Point) []byte {
+			if offset >= len(code) {
+				return []byte{}
+			} else {
+				return []byte(code[offset:])
+			}
+		},
+		nil,
+		&ParseOptions{ProgressCallback: func(state ParseState) bool {
+			// The parser will call the progress_callback during parsing, and at the very end
+			// during tree-balancing. For very large trees, this balancing act can take quite
+			// some time, so we want to verify that timing out during this operation is
+			// possible.
+			//
+			// We verify this by checking the current byte offset, as this number will *not* be
+			// updated during tree balancing. If we see the same offset twice, we know that we
+			// are in the balancing phase.
+			if state.CurrentByteOffset != currentByteOffset {
+				currentByteOffset = state.CurrentByteOffset
+				return false
+			} else {
+				inBalancing = true
+				return true
+			}
+		}},
+	)
+
+	assert.Nil(t, tree)
+	assert.True(t, inBalancing)
+
+	// If we resume parsing (implying we didn't call `parser.reset()`), we should be able to
+	// finish parsing the tree, continuing from where we left off.
+	tree = parser.ParseWithOptions(
+		func(offset int, _ Point) []byte {
+			if offset >= len(code) {
+				return []byte{}
+			} else {
+				return []byte(code[offset:])
+			}
+		},
+		nil,
+		&ParseOptions{ProgressCallback: func(state ParseState) bool {
+			// Because we've already finished parsing, we should only be resuming the
+			// balancing phase.
+			assert.Equal(t, currentByteOffset, state.CurrentByteOffset)
+			return false
+		}},
+	)
+
+	assert.False(t, tree.RootNode().HasError())
+	assert.EqualValues(t, functionCount, tree.RootNode().ChildCount())
+}
+
+func TestParsingWithTimeoutWhenErrorDetected(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping test on Windows due to millisecond timer resolution limitations")
+	}
+
+	parser := NewParser()
+	defer parser.Close()
+	parser.SetLanguage(getLanguage("json"))
+
+	// Parse an infinitely-long array, but insert an error after 1000 characters.
+	offset := uint32(0)
+	erroneousCode := "!,"
+	tree := parser.ParseWithOptions(
+		func(i int, _ Point) []byte {
+			if i == 0 {
+				return []byte("[")
+			} else if i <= 1000 {
+				return []byte("0,")
+			} else {
+				return []byte(erroneousCode)
+			}
+		},
+		nil,
+		&ParseOptions{ProgressCallback: func(state ParseState) bool {
+			offset = state.CurrentByteOffset
+			return state.HasError
+		}},
+	)
+
+	// The callback is called at the end of parsing, however, what we're asserting here is that
+	// parsing ends immediately as the error is detected. This is verified by checking the offset
+	// of the last byte processed is the length of the erroneous code we inserted, aka, 1002, or
+	// 1000 + the length of the erroneous code.
+	assert.EqualValues(t, 1000+len(erroneousCode), offset)
 	assert.Nil(t, tree)
 }
 
@@ -869,7 +1064,7 @@ func TestParsingWithIncludedRangeContainingMismatchedPositions(t *testing.T) {
 
 	parser.SetIncludedRanges([]Range{rangeToParse})
 
-	htmlTree := parser.ParseWith(chunkedInput(sourceCode, 3), nil)
+	htmlTree := parser.ParseWithOptions(chunkedInput(sourceCode, 3), nil, nil)
 
 	assert.Equal(t, rangeToParse, htmlTree.RootNode().Range())
 	assert.Equal(
@@ -991,7 +1186,7 @@ func TestParsingWithANewlyExcludedRange(t *testing.T) {
 	parser := NewParser()
 	defer parser.Close()
 	parser.SetLanguage(getLanguage("html"))
-	firstTree := parser.ParseWith(chunkedInput(sourceCode, 3), nil)
+	firstTree := parser.ParseWithOptions(chunkedInput(sourceCode, 3), nil, nil)
 
 	// Insert code at the beginning of the document.
 	prefix := "a very very long line of plain text. "
@@ -1026,7 +1221,7 @@ func TestParsingWithANewlyExcludedRange(t *testing.T) {
 		},
 	})
 
-	tree := parser.ParseWith(chunkedInput(sourceCode, 3), firstTree)
+	tree := parser.ParseWithOptions(chunkedInput(sourceCode, 3), firstTree, nil)
 
 	assert.Equal(
 		t,
@@ -1072,7 +1267,7 @@ func TestParsingWithANewlyIncludedRange(t *testing.T) {
 	defer parser.Close()
 	parser.SetLanguage(getLanguage("javascript"))
 	parser.SetIncludedRanges([]Range{simpleRange(range1Start, range1End)})
-	tree := parser.ParseWith(chunkedInput(sourceCode, 3), nil)
+	tree := parser.ParseWithOptions(chunkedInput(sourceCode, 3), nil, nil)
 	assert.Equal(
 		t,
 		"(program "+
@@ -1086,7 +1281,7 @@ func TestParsingWithANewlyIncludedRange(t *testing.T) {
 		simpleRange(range1Start, range1End),
 		simpleRange(range3Start, range3End),
 	})
-	tree2 := parser.ParseWith(chunkedInput(sourceCode, 3), tree)
+	tree2 := parser.ParseWithOptions(chunkedInput(sourceCode, 3), tree, nil)
 	assert.Equal(
 		t,
 		"(program "+
@@ -1154,6 +1349,33 @@ if foo && bar || baz {}
 	performEdit(tree, &sourceCode, edit)
 
 	parser.Parse(sourceCode, tree)
+}
+
+func TestParsingByHaltingAtOffset(t *testing.T) {
+	parser := NewParser()
+	defer parser.Close()
+	parser.SetLanguage(getLanguage("javascript"))
+
+	sourceCode := "function foo() { return 1; }"
+	sourceCode = strings.Repeat(sourceCode, 1000)
+
+	seenByteOffsets := []uint32{}
+
+	parser.ParseWithOptions(
+		func(offset int, _ Point) []byte {
+			if offset < len(sourceCode) {
+				return []byte(sourceCode[offset:])
+			}
+			return []byte{}
+		},
+		nil,
+		&ParseOptions{ProgressCallback: func(state ParseState) bool {
+			seenByteOffsets = append(seenByteOffsets, state.CurrentByteOffset)
+			return false
+		}},
+	)
+
+	assert.Greater(t, len(seenByteOffsets), 100)
 }
 
 func TestPathologicalExample1(t *testing.T) {

@@ -9,6 +9,8 @@ extern void logCallback(void *payload, TSLogType log_type, char *message);
 extern char *readUTF8(void *payload, uint32_t byte_index, TSPoint position, uint32_t *bytes_read);
 extern char *readUTF16LE(void *payload, uint32_t byte_offset, TSPoint position, uint32_t *bytes_read);
 extern char *readUTF16BE(void *payload, uint32_t byte_offset, TSPoint position, uint32_t *bytes_read);
+extern bool parserProgressCallback(TSParseState *state);
+extern char *readCustomEncoding(void *payload, uint32_t byte_offset, TSPoint position, uint32_t *bytes_read);
 */
 import "C"
 
@@ -27,6 +29,32 @@ type Parser struct {
 	_inner *C.TSParser
 }
 
+// A stateful object that is passed into the progress callback [ParseOptions.ProgressCallback]
+// to provide the current state of the parser.
+type ParseState struct {
+	// The byte offset in the document that the parser is at.
+	CurrentByteOffset uint32
+
+	// Indicates whether the parser has encountered an error during parsing.
+	HasError bool
+}
+
+// Options for parsing
+//
+// The [ParseOptions.ProgressCallback] property is a function that is called periodically
+// during parsing to check whether parsing should be cancelled.
+//
+// See [Parser.ParseWithOptions] for more information.
+type ParseOptions struct {
+	// A function that is called periodically during parsing to check
+	// whether parsing should be cancelled. If the progress callback returns
+	// `true`, then parsing will be cancelled. You can also use this to instrument
+	// parsing and check where the parser is at in the document. The progress callback
+	// takes a single argument, which is a [ParseState] representing the current
+	// state of the parser.
+	ProgressCallback func(ParseState) bool
+}
+
 // Create a new parser.
 func NewParser() *Parser {
 	return &Parser{_inner: C.ts_parser_new()}
@@ -43,12 +71,12 @@ func (p *Parser) Close() {
 // Returns an error indicating whether or not the language was successfully
 // assigned. Nil means assignment succeeded. Non-nil means there was a
 // version mismatch: the language was generated with an incompatible
-// version of the Tree-sitter CLI. Check the language's version using
-// `Version` and compare it to this library's `LANGUAGE_VERSION` and
-// `MIN_COMPATIBLE_LANGUAGE_VERSION` constants.
+// version of the Tree-sitter CLI. Check the language's ABI version using
+// [Language.Version] and compare it to this library's [LANGUAGE_VERSION] and
+// [MIN_COMPATIBLE_LANGUAGE_VERSION] constants.
 func (p *Parser) SetLanguage(l *Language) error {
-	version := l.Version()
-	if version >= C.TREE_SITTER_MIN_COMPATIBLE_LANGUAGE_VERSION && version <= C.TREE_SITTER_LANGUAGE_VERSION {
+	version := l.AbiVersion()
+	if version >= MIN_COMPATIBLE_LANGUAGE_VERSION && version <= LANGUAGE_VERSION {
 		C.ts_parser_set_language(p._inner, l.Inner)
 		return nil
 	}
@@ -142,14 +170,16 @@ func (p *Parser) StopPrintingDotGraphs() {
 //     the new text using [Tree.Edit].
 func (p *Parser) Parse(text []byte, oldTree *Tree) *Tree {
 	length := len(text)
-	return p.ParseWith(func(i int, _ Point) []byte {
+	return p.ParseWithOptions(func(i int, _ Point) []byte {
 		if i < length {
 			return text[i:]
 		}
 		return []byte{}
-	}, oldTree)
+	}, oldTree, nil)
 }
 
+// Deprecated: Use [Parser.ParseWithOptions] instead, and handle cancellation in the callback, this will be removed in 0.26.
+//
 // Parse a slice of UTF8 text.
 //
 // # Arguments:
@@ -248,6 +278,19 @@ func readUTF8(_payload unsafe.Pointer, byteIndex C.uint32_t, position C.TSPoint,
 	return strbytes
 }
 
+// This C function is passed to Tree-sitter as the progress callback.
+//
+//export parserProgressCallback
+func parserProgressCallback(state *C.TSParseState) C.bool {
+	payload := pointer.Restore(state.payload).(*ParseOptions)
+	return C.bool(payload.ProgressCallback(ParseState{
+		CurrentByteOffset: uint32(state.current_byte_offset),
+		HasError:          bool(state.has_error),
+	}))
+}
+
+// Deprecated: Use [Parser.ParseWithOptions] instead, this will be removed in 0.26.
+//
 // Parse UTF8 text provided in chunks by a callback.
 //
 // # Arguments:
@@ -259,6 +302,21 @@ func readUTF8(_payload unsafe.Pointer, byteIndex C.uint32_t, position C.TSPoint,
 //     document has changed since `old_tree` was created, then you must edit `old_tree` to match
 //     the new text using [Tree.Edit].
 func (p *Parser) ParseWith(callback func(int, Point) []byte, oldTree *Tree) *Tree {
+	return p.ParseWithOptions(callback, oldTree, nil)
+}
+
+// Parse UTF8 text provided in chunks by a callback.
+//
+// # Arguments:
+//   - `callback` A function that takes a byte offset and position and returns a slice of
+//     UTF8-encoded text starting at that byte offset and position. The slices can be of any
+//     length. If the given position is at the end of the text, the callback should return an
+//     empty slice.
+//   - `old_tree` A previous syntax tree parsed from the same document. If the text of the
+//     document has changed since `old_tree` was created, then you must edit `old_tree` to match
+//     the new text using [Tree.Edit].
+//   - `options` Options for parsing the text. This can be used to set a progress callback, or context.
+func (p *Parser) ParseWithOptions(callback func(int, Point) []byte, oldTree *Tree, options *ParseOptions) *Tree {
 	payload := payload[byte]{
 		callback: callback,
 		text:     nil,
@@ -285,7 +343,15 @@ func (p *Parser) ParseWith(callback func(int, Point) []byte, oldTree *Tree) *Tre
 		cOldTree = oldTree._inner
 	}
 
-	cNewTree := C.ts_parser_parse(p._inner, cOldTree, cInput)
+	var cOptions C.TSParseOptions
+	if options != nil {
+		cOptions = C.TSParseOptions{
+			progress_callback: (*[0]byte)(C.parserProgressCallback),
+			payload:           pointer.Save(options),
+		}
+	}
+
+	cNewTree := C.ts_parser_parse_with_options(p._inner, cOldTree, cInput, cOptions)
 
 	if cNewTree != nil {
 		return newTree(cNewTree)
@@ -334,7 +400,8 @@ func readUTF16BE(_payload unsafe.Pointer, byteOffset uint32, position C.TSPoint,
 	return strbytes
 }
 
-// Deprecated: Use [Parser.ParseUTF16LEWith] or [Parser.ParseUTF16BEWith] instead.
+// Deprecated: Use [Parser.ParseUTF16LEWith] or [Parser.ParseUTF16BEWith] instead, this will be removed in 0.26.
+//
 // Parse UTF16 text provided in chunks by a callback.
 //
 // # Arguments:
@@ -349,6 +416,8 @@ func (p *Parser) ParseUTF16With(callback func(int, Point) []uint16, oldTree *Tre
 	return p.ParseUTF16LEWith(callback, oldTree)
 }
 
+// Deprecated: Use [Parser.ParseUTF16LEWithOptions] instead, this will be removed in 0.26.
+//
 // Parse UTF16 little-endian text provided in chunks by a callback.
 //
 // # Arguments:
@@ -360,6 +429,21 @@ func (p *Parser) ParseUTF16With(callback func(int, Point) []uint16, oldTree *Tre
 //     document has changed since `old_tree` was created, then you must edit `old_tree` to match
 //     the new text using [Tree.Edit].
 func (p *Parser) ParseUTF16LEWith(callback func(int, Point) []uint16, oldTree *Tree) *Tree {
+	return p.ParseUTF16LEWithOptions(callback, oldTree, nil)
+}
+
+// Parse UTF16 little-endian text provided in chunks by a callback.
+//
+// # Arguments:
+//   - `callback` A function that takes a code point offset and position and returns a slice of
+//     UTF16-encoded text starting at that byte offset and position. The slices can be of any
+//     length. If the given position is at the end of the text, the callback should return an
+//     empty slice.
+//   - `old_tree` A previous syntax tree parsed from the same document. If the text of the
+//     document has changed since `old_tree` was created, then you must edit `old_tree` to match
+//     the new text using [Tree.Edit].
+//   - `options` Options for parsing the text. This can be used to set a progress callback.
+func (p *Parser) ParseUTF16LEWithOptions(callback func(int, Point) []uint16, oldTree *Tree, options *ParseOptions) *Tree {
 	payload := payload[uint16]{
 		callback: callback,
 		text:     nil,
@@ -386,13 +470,37 @@ func (p *Parser) ParseUTF16LEWith(callback func(int, Point) []uint16, oldTree *T
 		cOldTree = oldTree._inner
 	}
 
-	cNewTree := C.ts_parser_parse(p._inner, cOldTree, cInput)
+	var cOptions C.TSParseOptions
+	if options != nil {
+		cOptions = C.TSParseOptions{
+			progress_callback: (*[0]byte)(C.parserProgressCallback),
+			payload:           pointer.Save(options),
+		}
+	}
+
+	cNewTree := C.ts_parser_parse_with_options(p._inner, cOldTree, cInput, cOptions)
 
 	if cNewTree != nil {
 		return newTree(cNewTree)
 	}
 
 	return nil
+}
+
+// Deprecated: Use [Parser.ParseUTF16BEWithOptions] instead, this will be removed in 0.26.
+//
+// Parse UTF16 big-endian text provided in chunks by a callback.
+//
+// # Arguments:
+//   - `callback` A function that takes a code point offset and position and returns a slice of
+//     UTF16-encoded text starting at that byte offset and position. The slices can be of any
+//     length. If the given position is at the end of the text, the callback should return an
+//     empty slice.
+//   - `old_tree` A previous syntax tree parsed from the same document. If the text of the
+//     document has changed since `old_tree` was created, then you must edit `old_tree` to match
+//     the new text using [Tree.Edit].
+func (p *Parser) ParseUTF16BEWith(callback func(int, Point) []uint16, oldTree *Tree) *Tree {
+	return p.ParseUTF16BEWithOptions(callback, oldTree, nil)
 }
 
 // Parse UTF16 big-endian text provided in chunks by a callback.
@@ -405,7 +513,8 @@ func (p *Parser) ParseUTF16LEWith(callback func(int, Point) []uint16, oldTree *T
 //   - `old_tree` A previous syntax tree parsed from the same document. If the text of the
 //     document has changed since `old_tree` was created, then you must edit `old_tree` to match
 //     the new text using [Tree.Edit].
-func (p *Parser) ParseUTF16BEWith(callback func(int, Point) []uint16, oldTree *Tree) *Tree {
+//   - `options` Options for parsing the text. This can be used to set a progress callback.
+func (p *Parser) ParseUTF16BEWithOptions(callback func(int, Point) []uint16, oldTree *Tree, options *ParseOptions) *Tree {
 	payload := payload[uint16]{
 		callback: callback,
 		text:     nil,
@@ -432,7 +541,98 @@ func (p *Parser) ParseUTF16BEWith(callback func(int, Point) []uint16, oldTree *T
 		cOldTree = oldTree._inner
 	}
 
-	cNewTree := C.ts_parser_parse(p._inner, cOldTree, cInput)
+	var cOptions C.TSParseOptions
+	if options != nil {
+		cOptions = C.TSParseOptions{
+			progress_callback: (*[0]byte)(C.parserProgressCallback),
+			payload:           pointer.Save(options),
+		}
+	}
+
+	cNewTree := C.ts_parser_parse_with_options(p._inner, cOldTree, cInput, cOptions)
+
+	if cNewTree != nil {
+		return newTree(cNewTree)
+	}
+
+	return nil
+}
+
+// Decoder interface defines the required method for custom decoding
+type Decoder interface {
+	// Decode takes a byte slice and returns the decoded code point and number of bytes consumed
+	// Returns -1 as codePoint if decoding fails
+	Decode(data []byte) (codePoint int32, bytesRead uint32)
+}
+
+//export readCustomEncoding
+func readCustomEncoding(_payload unsafe.Pointer, byteOffset C.uint32_t, position C.TSPoint, bytesRead *C.uint32_t) *C.char {
+	payload := pointer.Restore(_payload).(*payload[byte])
+	payload.text = payload.callback(int(byteOffset), Point{uint(position.row), uint(position.column)})
+	*bytesRead = C.uint32_t(len(payload.text))
+	strbytes := C.CString(string(payload.text))
+	payload.cStrings = append(payload.cStrings, strbytes)
+	return strbytes
+}
+
+// Parse text provided in chunks by a callback using a custom encoding.
+// This is useful for parsing text in encodings that are not UTF-8 or UTF-16.
+//
+// # Arguments:
+//   - `callback` A function that takes a byte offset and position and returns a slice of text
+//     starting at that byte offset and position. The slices can be of any length. If the given
+//     position is at the end of the text, the callback should return an empty slice.
+//   - `old_tree` A previous syntax tree parsed from the same document. If the text of the
+//     document has changed since `old_tree` was created, then you must edit `old_tree` to match
+//     the new text using [`Tree::edit`].
+//   - `options` Options for parsing the text. This can be used to set a progress callback.
+//   - `decode` A function that takes a byte slice and returns the number of bytes consumed.
+//     It will also write the resulting code point to `codePoint`. If decoding fails, the function
+//     should write -1 to the code point. The signature for the function is the following:
+//     func myDecodeFn(data *C.char, length C.uint32_t, codePoint *C.int32_t) C.uint32_t
+//     Note that this function *must* be a C function, as it's called many times during parsing.
+//     To have a Go function be callable from C, you must use the `//export` directive. More info
+//     can be found at https://pkg.go.dev/cmd/cgo#hdr-C_references_to_Go. The reason for this is that
+//     knowing the function body at compile time rather than loading it at runtime is important for
+//     performance. This is also a significantly advanced feature, and should only be used if you
+//     have a good reason to do so, and understand how to implement the C function. An example of
+//     how to use this can be found in `parser_test.go`.
+func (p *Parser) ParseCustomEncoding(
+	callback func(int, Point) []byte,
+	oldTree *Tree,
+	options *ParseOptions,
+	decode unsafe.Pointer,
+) *Tree {
+	payload := &payload[byte]{
+		callback: callback,
+		text:     nil,
+		cStrings: make([]*C.char, 0),
+	}
+
+	cptr := pointer.Save(payload)
+	defer pointer.Unref(cptr)
+
+	cInput := C.TSInput{
+		payload:  unsafe.Pointer(cptr),
+		read:     (*[0]byte)(C.readCustomEncoding),
+		encoding: C.TSInputEncodingCustom,
+		decode:   (*[0]byte)(decode),
+	}
+
+	var cOldTree *C.TSTree
+	if oldTree != nil {
+		cOldTree = oldTree._inner
+	}
+
+	var cOptions C.TSParseOptions
+	if options != nil {
+		cOptions = C.TSParseOptions{
+			progress_callback: (*[0]byte)(C.parserProgressCallback),
+			payload:           pointer.Save(options),
+		}
+	}
+
+	cNewTree := C.ts_parser_parse_with_options(p._inner, cOldTree, cInput, cOptions)
 
 	if cNewTree != nil {
 		return newTree(cNewTree)
@@ -452,6 +652,8 @@ func (p *Parser) Reset() {
 	C.ts_parser_reset(p._inner)
 }
 
+// Deprecated: Use [Parser.ParseWithOptions] and pass in a callback instead, this will be removed in 0.26.
+//
 // Get the duration in microseconds that parsing is allowed to take.
 //
 // This is set via [Parser.SetTimeoutMicros].
@@ -459,6 +661,8 @@ func (p *Parser) TimeoutMicros() uint64 {
 	return uint64(C.ts_parser_timeout_micros(p._inner))
 }
 
+// Deprecated: Use [Parser.ParseWithOptions] and pass in a callback instead, this will be removed in 0.26.
+//
 // Set the maximum duration in microseconds that parsing should be allowed
 // to take before halting.
 //
@@ -496,11 +700,9 @@ func (p *Parser) IncludedRanges() []Range {
 // Otherwise, the given ranges must be ordered from earliest to latest
 // in the document, and they must not overlap. That is, the following
 // must hold for all `i` < `length - 1`:
-// ```text
 //
 //	ranges[i].end_byte <= ranges[i + 1].start_byte
 //
-// ```
 // If this requirement is not satisfied, method will return
 // [IncludedRangesError] error with an offset in the passed ranges
 // slice pointing to a first incorrect range.
@@ -532,11 +734,15 @@ func (p *Parser) SetIncludedRanges(ranges []Range) error {
 	return &IncludedRangesError{0}
 }
 
+// Deprecated: Use [Parser.ParseWithOptions] and pass in a callback instead, this will be removed in 0.26.
+//
 // Get the parser's current cancellation flag pointer.
 func (p *Parser) CancellationFlag() *uintptr {
 	return (*uintptr)(unsafe.Pointer(C.ts_parser_cancellation_flag(p._inner)))
 }
 
+// Deprecated: Use [Parser.ParseWithOptions] and pass in a callback instead, this will be removed in 0.26.
+//
 // Set the parser's current cancellation flag pointer.
 //
 // If a pointer is assigned, then the parser will periodically read from

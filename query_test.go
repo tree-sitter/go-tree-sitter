@@ -2,8 +2,10 @@ package tree_sitter_test
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	. "github.com/tree-sitter/go-tree-sitter"
@@ -310,9 +312,37 @@ func TestQueryErrorsOnInvalidSyntax(t *testing.T) {
 			"\n",
 		),
 	)
+
+	// MISSING keyword with full pattern
+	query, err = NewQuery(getLanguage("c"), `(MISSING (function_declarator (identifier)))`)
+	checkQueryErr(
+		query,
+		err,
+		strings.Join(
+			[]string{
+				`(MISSING (function_declarator (identifier)))`,
+				`         ^`,
+			},
+			"\n",
+		),
+	)
+
+	// MISSING keyword with multiple identifiers
+	query, err = NewQuery(getLanguage("c"), `(MISSING function_declarator function_declarator)`)
+	checkQueryErr(
+		query,
+		err,
+		strings.Join(
+			[]string{
+				`(MISSING function_declarator function_declarator)`,
+				`                             ^`,
+			},
+			"\n",
+		),
+	)
 }
 
-func TestQueryErrorsOnInvalidFields(t *testing.T) {
+func TestQueryErrorsOnInvalidSymbols(t *testing.T) {
 	language := getLanguage("javascript")
 
 	checkQueryErr := func(query *Query, err *QueryError, expected *QueryError) {
@@ -321,7 +351,46 @@ func TestQueryErrorsOnInvalidFields(t *testing.T) {
 		assert.Equal(t, expected, err)
 	}
 
-	query, err := NewQuery(language, "(clas)")
+	query, err := NewQuery(language, "\">>>>\"")
+	checkQueryErr(
+		query,
+		err,
+		&QueryError{
+			Row:     0,
+			Offset:  1,
+			Column:  1,
+			Kind:    QueryErrorNodeType,
+			Message: ">>>>",
+		},
+	)
+
+	query, err = NewQuery(language, "\"te\\\"st\"")
+	checkQueryErr(
+		query,
+		err,
+		&QueryError{
+			Row:     0,
+			Offset:  1,
+			Column:  1,
+			Kind:    QueryErrorNodeType,
+			Message: "te\\\"st",
+		},
+	)
+
+	query, err = NewQuery(language, "\"\\\\\" @cap")
+	checkQueryErr(
+		query,
+		err,
+		&QueryError{
+			Row:     0,
+			Offset:  1,
+			Column:  1,
+			Kind:    QueryErrorNodeType,
+			Message: "\\\\",
+		},
+	)
+
+	query, err = NewQuery(language, "(clas)")
 	checkQueryErr(
 		query,
 		err,
@@ -641,6 +710,65 @@ func TestQueryErrorsOnImpossiblePatterns(t *testing.T) {
 			),
 		},
 	)
+
+	query, err = NewQuery(jsLang, "(identifier/identifier)")
+	checkQueryErr(
+		query,
+		err,
+		&QueryError{
+			Row:    0,
+			Offset: 0,
+			Column: 0,
+			Kind:   QueryErrorStructure,
+			Message: strings.Join(
+				[]string{
+					"(identifier/identifier)",
+					"^",
+				},
+				"\n",
+			),
+		},
+	)
+
+	if jsLang.AbiVersion() >= 15 {
+		query, err = NewQuery(jsLang, "(statement/identifier)")
+		checkQueryErr(
+			query,
+			err,
+			&QueryError{
+				Row:    0,
+				Offset: 0,
+				Column: 0,
+				Kind:   QueryErrorStructure,
+				Message: strings.Join(
+					[]string{
+						"(statement/identifier)",
+						"^",
+					},
+					"\n",
+				),
+			},
+		)
+
+		query, err = NewQuery(jsLang, "(statement/pattern)")
+		checkQueryErr(
+			query,
+			err,
+			&QueryError{
+				Row:    0,
+				Offset: 0,
+				Column: 0,
+				Kind:   QueryErrorStructure,
+				Message: strings.Join(
+					[]string{
+						"(statement/pattern)",
+						"^",
+					},
+					"\n",
+				),
+			},
+		)
+	}
 }
 
 func TestQueryVerifiesPossiblePatternsWithAliasedParentNodes(t *testing.T) {
@@ -890,6 +1018,75 @@ func TestQueryMatchesCapturingErrorNodes(t *testing.T) {
 		"function a(b,, c, d :e:) {}",
 		[]formattedMatch{
 			fmtMatch(0, fmtCapture("the-error", ":e:"), fmtCapture("the-error-identifier", "e")),
+		},
+	)
+}
+
+func TestQueryMatchesCapturingMissingNodes(t *testing.T) {
+	language := getLanguage("javascript")
+	query, err := NewQuery(
+		language,
+		`
+		(MISSING
+			; Comments should be valid
+		) @missing
+		(MISSING
+			; Comments should be valid
+			";"
+			; Comments should be valid
+		) @missing-semicolon
+		`,
+	)
+	defer query.Close()
+	assert.Nil(t, err)
+
+	assertQueryMatches(
+		t,
+		language,
+		query,
+		`
+        x = function(a) { b; } function(c) { d; }
+        //                    ^ MISSING semicolon here
+		`,
+		[]formattedMatch{
+			fmtMatch(0, fmtCapture("missing", "")),
+			fmtMatch(1, fmtCapture("missing-semicolon", "")),
+		},
+	)
+
+	language = getLanguage("c")
+	query, err = NewQuery(
+		language,
+		`
+		(MISSING field_identifier) @missing-field-ident
+		(MISSING identifier) @missing-ident
+		(MISSING) @missing-anything
+		`,
+	)
+	defer query.Close()
+	assert.Nil(t, err)
+
+	assertQueryMatches(
+		t,
+		language,
+		query,
+		`
+		int main() {
+			if (a.) {
+			//    ^ MISSING field_identifier here
+			b();
+			c();
+
+			if (*) d();
+			//   ^ MISSING identifier here
+			}
+		}
+		`,
+		[]formattedMatch{
+			fmtMatch(0, fmtCapture("missing-field-ident", "")),
+			fmtMatch(2, fmtCapture("missing-anything", "")),
+			fmtMatch(1, fmtCapture("missing-ident", "")),
+			fmtMatch(2, fmtCapture("missing-anything", "")),
 		},
 	)
 }
@@ -2068,6 +2265,7 @@ func TestQueryMatchesWithinByteRange(t *testing.T) {
 		fmtMatch(0, fmtCapture("element", "e")),
 	})
 
+	// An end byte of zero indicates there is no end
 	matches = cursor.SetByteRange(12, 0).Matches(query, tree.RootNode(), []byte(source))
 	assert.Equal(t, collectMatches(matches, query, source), []formattedMatch{
 		fmtMatch(0, fmtCapture("element", "e")),
@@ -4754,6 +4952,250 @@ func TestQueryOnEmptySourceCode(t *testing.T) {
 			fmtMatch(0, fmtCapture("program", "")),
 		},
 	)
+}
+
+func TestQueryExecutionWithTimeout(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Skipping test on Windows due to millisecond timer resolution limitations")
+	}
+
+	language := getLanguage("javascript")
+	parser := NewParser()
+	defer parser.Close()
+	parser.SetLanguage(language)
+
+	sourceCode := strings.Repeat("function foo() { while (true) { } }\n", 1000)
+	tree := parser.Parse([]byte(sourceCode), nil)
+	defer tree.Close()
+
+	query, err := NewQuery(language, "(function_declaration) @function")
+	assert.Nil(t, err)
+	defer query.Close()
+
+	cursor := NewQueryCursor()
+	defer cursor.Close()
+
+	startTime := time.Now()
+	matches := cursor.MatchesWithOptions(
+		query,
+		tree.RootNode(),
+		[]byte(sourceCode),
+		QueryCursorOptions{ProgressCallback: func(s QueryCursorState) bool {
+			return time.Since(startTime).Microseconds() > 100
+		}},
+	)
+	count := 0
+	for matches.Next() != nil {
+		count++
+	}
+	assert.True(t, count < 1000)
+
+	matches = cursor.Matches(query, tree.RootNode(), []byte(sourceCode))
+	count = 0
+	for matches.Next() != nil {
+		count++
+	}
+	assert.Equal(t, 1000, count)
+}
+
+func TestQueryExecutionWithPointsCausingUnderflow(t *testing.T) {
+	language := getLanguage("rust")
+	parser := NewParser()
+	defer parser.Close()
+	parser.SetLanguage(language)
+
+	sourceCode := `
+fn main() {
+	println!("{:?}", foo());
+}
+	`
+	parser.SetIncludedRanges([]Range{
+		{
+			StartByte:  24,
+			EndByte:    39,
+			StartPoint: Point{0, 0},
+			EndPoint:   Point{0, 0},
+		},
+	})
+	tree := parser.Parse([]byte(sourceCode), nil)
+	defer tree.Close()
+
+	query, err := NewQuery(language, "(call_expression) @cap")
+	assert.Nil(t, err)
+	defer query.Close()
+
+	cursor := NewQueryCursor()
+	defer cursor.Close()
+
+	matches := cursor.Matches(query, tree.RootNode(), []byte(sourceCode))
+	assert.Equal(t, 1, len(collectMatches(matches, query, sourceCode)))
+
+	tree.Edit(&InputEdit{
+		StartByte:      40,
+		OldEndByte:     40,
+		NewEndByte:     41,
+		StartPosition:  Point{1, 28},
+		OldEndPosition: Point{1, 28},
+		NewEndPosition: Point{2, 0},
+	})
+
+	tree2 := parser.Parse([]byte(sourceCode), tree)
+	defer tree2.Close()
+
+	matches2 := cursor.Matches(query, tree2.RootNode(), []byte(sourceCode))
+	assert.Equal(t, 1, len(collectMatches(matches2, query, sourceCode)))
+}
+
+func TestQueryWithWildcardBehaviorBeforeAnchor(t *testing.T) {
+	language := getLanguage("python")
+	parser := NewParser()
+	defer parser.Close()
+	parser.SetLanguage(language)
+
+	source := `
+		(a, b)
+		(c, d,)
+	`
+
+	query, err := NewQuery(language, `(tuple (_) @last . ")" .) @match`)
+	assert.Nil(t, err)
+	defer query.Close()
+
+	assertQueryMatches(
+		t,
+		language,
+		query,
+		source,
+		[]formattedMatch{
+			fmtMatch(0, fmtCapture("match", "(a, b)"), fmtCapture("last", "b")),
+			fmtMatch(0, fmtCapture("match", "(c, d,)"), fmtCapture("last", "d")),
+		},
+	)
+
+	query, err = NewQuery(language, `(tuple _ @last . ")" .) @match`)
+	assert.Nil(t, err)
+	defer query.Close()
+
+	assertQueryMatches(
+		t,
+		language,
+		query,
+		source,
+		[]formattedMatch{
+			fmtMatch(0, fmtCapture("match", "(a, b)"), fmtCapture("last", "b")),
+			fmtMatch(0, fmtCapture("match", "(c, d,)"), fmtCapture("last", ",")),
+		},
+	)
+}
+
+func TestPatternAlternativesFollowLastChildConstraint(t *testing.T) {
+	language := getLanguage("rust")
+	parser := NewParser()
+	defer parser.Close()
+	parser.SetLanguage(language)
+
+	source := `
+fn f() {
+	if a {} // <- should NOT match
+	if b {}
+}
+	`
+
+	tree := parser.Parse([]byte(source), nil)
+	defer tree.Close()
+
+	query, err := NewQuery(language, `(block
+		[
+			(type_cast_expression)
+			(expression_statement)
+		] @last
+		.
+	)`)
+	assert.Nil(t, err)
+	defer query.Close()
+
+	cursor := NewQueryCursor()
+	defer cursor.Close()
+
+	matches := collectMatches(cursor.Matches(query, tree.RootNode(), []byte(source)), query, source)
+
+	flippedQuery, err := NewQuery(language, `(block
+		[
+			(expression_statement)
+			(type_cast_expression)
+		] @last
+		.
+	)`)
+	assert.Nil(t, err)
+	defer flippedQuery.Close()
+
+	flippedMatches := collectMatches(cursor.Matches(flippedQuery, tree.RootNode(), []byte(source)), flippedQuery, source)
+
+	assert.Equal(t, []formattedMatch{fmtMatch(0, fmtCapture("last", "if b {}"))}, matches)
+	assert.Equal(t, matches, flippedMatches)
+}
+
+func TestWildcardParentAllowsFallibleChildPatterns(t *testing.T) {
+	language := getLanguage("javascript")
+	parser := NewParser()
+	defer parser.Close()
+	parser.SetLanguage(language)
+
+	sourceCode := `
+function foo() {
+    "bar"
+}
+	`
+
+	query, err := NewQuery(language, `(function_declaration
+		(_
+			(expression_statement)
+		)
+	) @part`)
+	assert.Nil(t, err)
+	defer query.Close()
+
+	assertQueryMatches(
+		t,
+		language,
+		query,
+		sourceCode,
+		[]formattedMatch{
+			fmtMatch(0, fmtCapture("part", "function foo() {\n    \"bar\"\n}")),
+		},
+	)
+}
+
+func TestUnfinishedCapturesAreNotDefiniteWithPendingAnchors(t *testing.T) {
+	language := getLanguage("javascript")
+	parser := NewParser()
+	defer parser.Close()
+	parser.SetLanguage(language)
+
+	sourceCode := `
+const foo = [
+  1, 2, 3
+]
+	`
+
+	tree := parser.Parse([]byte(sourceCode), nil)
+	defer tree.Close()
+
+	query, err := NewQuery(language, `(array (_) @foo . "]")`)
+	assert.Nil(t, err)
+	defer query.Close()
+
+	capturesCursor := NewQueryCursor()
+	defer capturesCursor.Close()
+	captures := collectCaptures(capturesCursor.Captures(query, tree.RootNode(), []byte(sourceCode)), query, sourceCode)
+
+	matchesCursor := NewQueryCursor()
+	defer matchesCursor.Close()
+	matches := collectMatches(matchesCursor.Matches(query, tree.RootNode(), []byte(sourceCode)), query, sourceCode)
+
+	assert.Equal(t, []formattedCapture{{"foo", "3"}}, captures)
+	assert.Equal(t, 1, len(matches))
+	assert.Equal(t, []formattedCapture{{"foo", "3"}}, matches[0].Captures)
 }
 
 type formattedCapture struct {
