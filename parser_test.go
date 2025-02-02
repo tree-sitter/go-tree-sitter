@@ -133,7 +133,7 @@ func TestParsingSimpleString(t *testing.T) {
 
 	assert.Equal(t, rootNode.ToSexp(), "(source_file (struct_item name: (type_identifier) body: (field_declaration_list)) (function_item name: (identifier) parameters: (parameters) body: (block)))")
 
-	structNode := rootNode.Child(0)
+	structNode := nodeMust(rootNode.Child(0))
 	assert.Equal(t, structNode.Kind(), "struct_item")
 }
 
@@ -232,7 +232,7 @@ func TestParsingWithCustomUTF8Input(t *testing.T) {
 	assert.Equal(t, root.ToSexp(), "(source_file (function_item (visibility_modifier) name: (identifier) parameters: (parameters) body: (block (integer_literal))))")
 	assert.Equal(t, root.Kind(), "source_file")
 	assert.False(t, root.HasError())
-	assert.Equal(t, root.Child(0).Kind(), "function_item")
+	assert.Equal(t, nodeMust(root.Child(0)).Kind(), "function_item")
 }
 
 func TestParsingWithCustomUTF16LEInput(t *testing.T) {
@@ -266,7 +266,7 @@ func TestParsingWithCustomUTF16LEInput(t *testing.T) {
 	assert.Equal(t, root.ToSexp(), "(source_file (function_item (visibility_modifier) name: (identifier) parameters: (parameters) body: (block (integer_literal))))")
 	assert.Equal(t, root.Kind(), "source_file")
 	assert.False(t, root.HasError())
-	assert.Equal(t, root.Child(0).Kind(), "function_item")
+	assert.Equal(t, nodeMust(root.Child(0)).Kind(), "function_item")
 }
 
 func TestParsingWithCustomUTF16BEInput(t *testing.T) {
@@ -311,7 +311,7 @@ func TestParsingWithCustomUTF16BEInput(t *testing.T) {
 	assert.Equal(t, root.ToSexp(), "(source_file (function_item (visibility_modifier) name: (identifier) parameters: (parameters) body: (block (integer_literal))))")
 	assert.Equal(t, root.Kind(), "source_file")
 	assert.False(t, root.HasError())
-	assert.Equal(t, root.Child(0).Kind(), "function_item")
+	assert.Equal(t, nodeMust(root.Child(0)).Kind(), "function_item")
 }
 
 func TestParsingWithCallbackReturningOwnedStrings(t *testing.T) {
@@ -717,7 +717,7 @@ func TestParsingWithTimeout(t *testing.T) {
 		nil,
 		nil,
 	)
-	assert.Equal(t, "array", tree.RootNode().Child(0).Kind())
+	assert.Equal(t, "array", nodeMust(tree.RootNode().Child(0)).Kind())
 }
 
 func TestParsingWithTimeoutAndReset(t *testing.T) {
@@ -753,7 +753,7 @@ func TestParsingWithTimeoutAndReset(t *testing.T) {
 	// it does not see the changes to the beginning of the source code.
 	code = []byte("[null, 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]")
 	tree = parser.ParseWithOptions(callback, nil, nil)
-	assert.Equal(t, "string", tree.RootNode().NamedChild(0).NamedChild(0).Kind())
+	assert.Equal(t, "string", nodeMust(nodeMust(tree.RootNode().NamedChild(0)).NamedChild(0)).Kind())
 
 	code = []byte("[\"ok\", 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]")
 	tree = parser.ParseWithOptions(
@@ -770,7 +770,7 @@ func TestParsingWithTimeoutAndReset(t *testing.T) {
 	parser.Reset()
 	code = []byte("[null, 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]")
 	tree = parser.ParseWithOptions(callback, nil, nil)
-	assert.Equal(t, "null", tree.RootNode().NamedChild(0).NamedChild(0).Kind())
+	assert.Equal(t, "null", nodeMust(nodeMust(tree.RootNode().NamedChild(0)).NamedChild(0)).Kind())
 }
 
 func TestParsingWithTimeoutAndImplicitReset(t *testing.T) {
@@ -805,7 +805,7 @@ func TestParsingWithTimeoutAndImplicitReset(t *testing.T) {
 	parser.SetLanguage(getLanguage("json"))
 	code = []byte("[null, 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32]")
 	tree = parser.ParseWithOptions(callback, nil, nil)
-	assert.Equal(t, "null", tree.RootNode().NamedChild(0).NamedChild(0).Kind())
+	assert.Equal(t, "null", nodeMust(nodeMust(tree.RootNode().NamedChild(0)).NamedChild(0)).Kind())
 }
 
 func TestParsingWithTimeoutAndNoCompletion(t *testing.T) {
@@ -951,7 +951,7 @@ func TestParsingWithOneIncludedRange(t *testing.T) {
 	defer parser.Close()
 	parser.SetLanguage(getLanguage("html"))
 	htmlTree := parser.Parse([]byte(sourceCode), nil)
-	scriptContentNode := htmlTree.RootNode().Child(1).Child(1)
+	scriptContentNode := nodeMust(nodeMust(htmlTree.RootNode().Child(1)).Child(1))
 	assert.Equal(t, "raw_text", scriptContentNode.Kind())
 
 	assert.Equal(t, []Range{
@@ -985,16 +985,16 @@ func TestParsingWithMultipleIncludedRanges(t *testing.T) {
 	defer parser.Close()
 	parser.SetLanguage(getLanguage("javascript"))
 	jsTree := parser.Parse([]byte(sourceCode), nil)
-	templateStringNode := jsTree.RootNode().DescendantForByteRange(
+	templateStringNode := nodeMust(jsTree.RootNode().DescendantForByteRange(
 		uint(strings.Index(sourceCode, "`<")),
 		uint(strings.Index(sourceCode, ">`")),
-	)
+	))
 	assert.Equal(t, "template_string", templateStringNode.Kind())
 
-	openQuoteNode := templateStringNode.Child(0)
-	interpolationNode1 := templateStringNode.Child(2)
-	interpolationNode2 := templateStringNode.Child(4)
-	closeQuoteNode := templateStringNode.Child(6)
+	openQuoteNode := nodeMust(templateStringNode.Child(0))
+	interpolationNode1 := nodeMust(templateStringNode.Child(2))
+	interpolationNode2 := nodeMust(templateStringNode.Child(4))
+	closeQuoteNode := nodeMust(templateStringNode.Child(6))
 
 	parser.SetLanguage(getLanguage("html"))
 	htmlRanges := []Range{
@@ -1027,11 +1027,11 @@ func TestParsingWithMultipleIncludedRanges(t *testing.T) {
 	)
 	assert.Equal(t, htmlRanges, htmlTree.IncludedRanges())
 
-	divElementNode := htmlTree.RootNode().Child(0)
-	helloTextNode := divElementNode.Child(1)
-	bElementNode := divElementNode.Child(2)
-	bStartTagNode := bElementNode.Child(0)
-	bEndTagNode := bElementNode.Child(1)
+	divElementNode := nodeMust(htmlTree.RootNode().Child(0))
+	helloTextNode := nodeMust(divElementNode.Child(1))
+	bElementNode := nodeMust(divElementNode.Child(2))
+	bStartTagNode := nodeMust(bElementNode.Child(0))
+	bEndTagNode := nodeMust(bElementNode.Child(1))
 
 	assert.Equal(t, "text", helloTextNode.Kind())
 	assert.Equal(t, uint(strings.Index(sourceCode, "Hello")), helloTextNode.StartByte())
@@ -1164,8 +1164,8 @@ func TestParsingWithExternalScannerThatUsesIncludedRangeBoundaries(t *testing.T)
 	tree := parser.Parse([]byte(sourceCode), nil)
 	defer tree.Close()
 	root := tree.RootNode()
-	statement1 := root.Child(0)
-	statement2 := root.Child(1)
+	statement1 := nodeMust(root.Child(0))
+	statement2 := nodeMust(root.Child(1))
 
 	assert.Equal(
 		t,

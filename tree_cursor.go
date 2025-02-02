@@ -24,8 +24,8 @@ func (tc *TreeCursor) Copy() *TreeCursor {
 }
 
 // Get the tree cursor's current [Node].
-func (tc *TreeCursor) Node() *Node {
-	return newNode(C.ts_tree_cursor_current_node(&tc._inner))
+func (tc *TreeCursor) Node() Node {
+	return Node{_inner: C.ts_tree_cursor_current_node(&tc._inner)}
 }
 
 // Get the numerical field id of this tree cursor's current node.
