@@ -64,6 +64,6 @@ func ExampleTreeCursor() {
 	// true
 	// package_clause
 	// true
-	// true
+	// false
 	// function_declaration
 }

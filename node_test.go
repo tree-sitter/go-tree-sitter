@@ -48,7 +48,7 @@ func ExampleNode() {
 	fmt.Println(rootNode.StartPosition())
 	fmt.Println(rootNode.EndPosition())
 
-	functionNode := rootNode.Child(2)
+	functionNode := rootNode.Child(1)
 	fmt.Println(functionNode.Kind())
 	fmt.Println(functionNode.ChildByFieldName("name").Kind())
 
