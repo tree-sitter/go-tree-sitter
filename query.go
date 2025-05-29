@@ -774,7 +774,10 @@ func (qc *QueryCursor) Matches(query *Query, node *Node, text []byte) QueryMatch
 // captures. Because multiple patterns can match the same set of nodes,
 // one match may contain captures that appear *before* some of the
 // captures from a previous match.
-func (qc *QueryCursor) IterMatches(query *Query, node *Node, text []byte) iter.Seq[*QueryMatch] {
+//
+// Each match yielded by the iterator will overwrite the memory at the same location as prior matches, since the memory is reused. You can think of this as a stateful iterator.
+// If you need to keep the data of a prior match without it being overwritten, you should copy what you need before moving on to the next match
+func (qc *QueryCursor) AllMatches(query *Query, node *Node, text []byte) iter.Seq[*QueryMatch] {
 	qm := qc.Matches(query, node, text)
 	return func(yield func(*QueryMatch) bool) {
 		for {
@@ -851,7 +854,10 @@ func (qc *QueryCursor) Captures(query *Query, node *Node, text []byte) QueryCapt
 //
 // This is useful if you don't care about which pattern matched, and just
 // want a single, ordered sequence of captures.
-func (qc *QueryCursor) IterCaptures(query *Query, node *Node, text []byte) iter.Seq2[*QueryMatch, uint] {
+
+// Each capture yielded by the iterator will overwrite the memory at the same location as prior captures, since the memory is reused. You can think of this as a stateful iterator.
+// If you need to keep the data of a prior capture without it being overwritten, you should copy what you need before moving on to the next capture
+func (qc *QueryCursor) AllCaptures(query *Query, node *Node, text []byte) iter.Seq2[*QueryMatch, uint] {
 	qm := qc.Captures(query, node, text)
 	return func(yield func(*QueryMatch, uint) bool) {
 		for {
@@ -865,6 +871,7 @@ func (qc *QueryCursor) IterCaptures(query *Query, node *Node, text []byte) iter.
 		}
 	}
 }
+
 // Set the range of bytes in which the query will be executed.
 //
 // The query cursor will return matches that intersect with the given point range.
