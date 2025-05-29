@@ -10,6 +10,7 @@ import "C"
 
 import (
 	"bytes"
+	"iter"
 	"fmt"
 	"math"
 	"regexp"
@@ -767,6 +768,27 @@ func (qc *QueryCursor) Matches(query *Query, node *Node, text []byte) QueryMatch
 	return qm
 }
 
+// Iterator yielding all of the matches in the order that they were found.
+//
+// Each match contains the index of the pattern that matched, and a list of
+// captures. Because multiple patterns can match the same set of nodes,
+// one match may contain captures that appear *before* some of the
+// captures from a previous match.
+func (qc *QueryCursor) IterMatches(query *Query, node *Node, text []byte) iter.Seq[*QueryMatch] {
+	qm := qc.Matches(query, node, text)
+	return func(yield func(*QueryMatch) bool) {
+		for {
+			c := qm.Next()
+			if c == nil {
+				break
+			}
+			if !yield(c) {
+				return
+			}
+		}
+	}
+}
+
 // This C function is passed to Tree-sitter as the progress callback.
 //
 //export queryProgressCallback
@@ -824,6 +846,25 @@ func (qc *QueryCursor) Captures(query *Query, node *Node, text []byte) QueryCapt
 	}
 }
 
+// Iterator yielding all of the individual captures in the order that they
+// appear.
+//
+// This is useful if you don't care about which pattern matched, and just
+// want a single, ordered sequence of captures.
+func (qc *QueryCursor) IterCaptures(query *Query, node *Node, text []byte) iter.Seq2[*QueryMatch, uint] {
+	qm := qc.Captures(query, node, text)
+	return func(yield func(*QueryMatch, uint) bool) {
+		for {
+			c, i := qm.Next()
+			if c == nil {
+				break
+			}
+			if !yield(c, i) {
+				return
+			}
+		}
+	}
+}
 // Set the range of bytes in which the query will be executed.
 //
 // The query cursor will return matches that intersect with the given point range.
