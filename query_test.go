@@ -3909,12 +3909,15 @@ func TestQueryCapturesAndMatchesIter(t *testing.T) {
 	cursor := NewQueryCursor()
 	defer cursor.Close()
 
-	captureMap := make(map[uint]*QueryMatch)
+	captureSlice := make([]*QueryMatch, 0)
+	indexSlice := make([]uint, 0)
 	for capture, i := range cursor.IterCaptures(query, tree.RootNode(), []byte(source)) {
-		captureMap[i] = capture
+		captureSlice = append(captureSlice, capture)
+		indexSlice = append(indexSlice, i)
 	}
 
-	assert.Len(t, captureMap, 3)
+	assert.Len(t, captureSlice, 3)
+	assert.EqualValues(t, indexSlice, []uint{0,0,0})
 
 	matchesSlice := make([]*QueryMatch, 0)
 
