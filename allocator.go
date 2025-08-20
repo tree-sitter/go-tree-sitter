@@ -4,6 +4,10 @@ package tree_sitter
 #cgo CFLAGS: -Iinclude -Isrc -std=c11 -D_POSIX_C_SOURCE=200112L -D_DEFAULT_SOURCE
 #include <tree_sitter/api.h>
 #include "allocator.h"
+
+static inline void ts_use_libc_allocator(void) {
+    ts_set_allocator(malloc, calloc, realloc, free);
+}
 */
 import "C"
 
@@ -62,6 +66,11 @@ func SetAllocator(
 	newRealloc func(ptr unsafe.Pointer, size uint) unsafe.Pointer,
 	newFree func(ptr unsafe.Pointer),
 ) {
+	if newMalloc == nil && newCalloc == nil && newRealloc == nil && newFree == nil {
+		C.ts_use_libc_allocator()
+		return
+	}
+
 	if newMalloc != nil {
 		malloc_fn.Store(func(size C.size_t) unsafe.Pointer {
 			return newMalloc(uint(size))
