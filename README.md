@@ -1,6 +1,6 @@
 # Go Tree-sitter
 
-[![CI][ci]](https://github.com/tree-sitter/py-tree-sitter/actions/workflows/ci.yml)
+[![CI][ci]](https://github.com/tree-sitter/go-tree-sitter/actions/workflows/ci.yml)
 [![Go version][go version]](https://github.com/tree-sitter/go-tree-sitter/blob/master/go.mod)
 [![Version][version]](https://github.com/tree-sitter/go-tree-sitter/tags)
 [![Docs][docs]](https://pkg.go.dev/github.com/tree-sitter/go-tree-sitter)
