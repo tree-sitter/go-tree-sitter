@@ -48,11 +48,12 @@ func ExampleNode() {
 	fmt.Println(rootNode.StartPosition())
 	fmt.Println(rootNode.EndPosition())
 
-	functionNode := rootNode.Child(1)
+	functionNode, _ := rootNode.Child(1)
 	fmt.Println(functionNode.Kind())
-	fmt.Println(functionNode.ChildByFieldName("name").Kind())
+	nameFieldNode, _ := functionNode.ChildByFieldName("name")
+	fmt.Println(nameFieldNode.Kind())
 
-	functionNameNode := functionNode.Child(1)
+	functionNameNode, _ := functionNode.Child(1)
 	fmt.Println(functionNameNode.StartPosition())
 	fmt.Println(functionNameNode.EndPosition())
 
@@ -68,7 +69,7 @@ func ExampleNode() {
 
 func TestNodeChild(t *testing.T) {
 	tree := parseJsonExample()
-	arrayNode := tree.RootNode().Child(0)
+	arrayNode := nodeMust(tree.RootNode().Child(0))
 
 	assert.Equal(t, "array", arrayNode.Kind())
 	assert.EqualValues(t, 3, arrayNode.NamedChildCount())
@@ -78,13 +79,13 @@ func TestNodeChild(t *testing.T) {
 	assert.Equal(t, Point{8, 1}, arrayNode.EndPosition())
 	assert.EqualValues(t, 7, arrayNode.ChildCount())
 
-	leftBracketNode := arrayNode.Child(0)
-	numberNode := arrayNode.Child(1)
-	commaNode1 := arrayNode.Child(2)
-	falseNode := arrayNode.Child(3)
-	commaNode2 := arrayNode.Child(4)
-	objectNode := arrayNode.Child(5)
-	rightBracketNode := arrayNode.Child(6)
+	leftBracketNode := nodeMust(arrayNode.Child(0))
+	numberNode := nodeMust(arrayNode.Child(1))
+	commaNode1 := nodeMust(arrayNode.Child(2))
+	falseNode := nodeMust(arrayNode.Child(3))
+	commaNode2 := nodeMust(arrayNode.Child(4))
+	objectNode := nodeMust(arrayNode.Child(5))
+	rightBracketNode := nodeMust(arrayNode.Child(6))
 
 	assert.Equal(t, "[", leftBracketNode.Kind())
 	assert.Equal(t, "number", numberNode.Kind())
@@ -117,9 +118,9 @@ func TestNodeChild(t *testing.T) {
 	assert.Equal(t, Point{7, 3}, objectNode.EndPosition())
 	assert.EqualValues(t, 3, objectNode.ChildCount())
 
-	leftBraceNode := objectNode.Child(0)
-	pairNode := objectNode.Child(1)
-	rightBraceNode := objectNode.Child(2)
+	leftBraceNode := nodeMust(objectNode.Child(0))
+	pairNode := nodeMust(objectNode.Child(1))
+	rightBraceNode := nodeMust(objectNode.Child(2))
 
 	assert.Equal(t, "{", leftBraceNode.Kind())
 	assert.Equal(t, "pair", pairNode.Kind())
@@ -135,9 +136,9 @@ func TestNodeChild(t *testing.T) {
 	assert.Equal(t, Point{6, 13}, pairNode.EndPosition())
 	assert.EqualValues(t, 3, pairNode.ChildCount())
 
-	stringNode := pairNode.Child(0)
-	colonNode := pairNode.Child(1)
-	nullNode := pairNode.Child(2)
+	stringNode := nodeMust(pairNode.Child(0))
+	colonNode := nodeMust(pairNode.Child(1))
+	nullNode := nodeMust(pairNode.Child(2))
 
 	assert.Equal(t, "string", stringNode.Kind())
 	assert.Equal(t, ":", colonNode.Kind())
@@ -157,26 +158,28 @@ func TestNodeChild(t *testing.T) {
 	assert.Equal(t, Point{6, 9}, nullNode.StartPosition())
 	assert.Equal(t, Point{6, 13}, nullNode.EndPosition())
 
-	assert.Equal(t, pairNode, stringNode.Parent())
-	assert.Equal(t, pairNode, nullNode.Parent())
-	assert.Equal(t, objectNode, pairNode.Parent())
-	assert.Equal(t, arrayNode, numberNode.Parent())
-	assert.Equal(t, arrayNode, falseNode.Parent())
-	assert.Equal(t, arrayNode, objectNode.Parent())
-	assert.Equal(t, tree.RootNode(), arrayNode.Parent())
-	assert.Nil(t, tree.RootNode().Parent())
+	rootNode := tree.RootNode()
 
-	assert.Equal(t, arrayNode, tree.RootNode().ChildWithDescendant(nullNode))
-	assert.Equal(t, objectNode, arrayNode.ChildWithDescendant(nullNode))
-	assert.Equal(t, pairNode, objectNode.ChildWithDescendant(nullNode))
-	assert.Equal(t, nullNode, pairNode.ChildWithDescendant(nullNode))
-	assert.Nil(t, nullNode.ChildWithDescendant(nullNode))
+	assert.Equal(t, pairNode, nodeMust(stringNode.Parent()))
+	assert.Equal(t, pairNode, nodeMust(nullNode.Parent()))
+	assert.Equal(t, objectNode, nodeMust(pairNode.Parent()))
+	assert.Equal(t, arrayNode, nodeMust(numberNode.Parent()))
+	assert.Equal(t, arrayNode, nodeMust(falseNode.Parent()))
+	assert.Equal(t, arrayNode, nodeMust(objectNode.Parent()))
+	assert.Equal(t, rootNode, nodeMust(arrayNode.Parent()))
+	assert.Nil(t, nodeMustNot(tree.RootNode().Parent()))
+
+	assert.Equal(t, arrayNode, nodeMust(tree.RootNode().ChildWithDescendant(nullNode)))
+	assert.Equal(t, objectNode, nodeMust(arrayNode.ChildWithDescendant(nullNode)))
+	assert.Equal(t, pairNode, nodeMust(objectNode.ChildWithDescendant(nullNode)))
+	assert.Equal(t, nullNode, nodeMust(pairNode.ChildWithDescendant(nullNode)))
+	assert.Nil(t, nodeMustNot(nullNode.ChildWithDescendant(nullNode)))
 }
 
 func TestNodeChildren(t *testing.T) {
 	tree := parseJsonExample()
 	cursor := tree.Walk()
-	arrayNode := tree.RootNode().Child(0)
+	arrayNode := nodeMust(tree.RootNode().Child(0))
 
 	children := arrayNode.Children(cursor)
 	var kinds []string
@@ -227,14 +230,14 @@ func TestNodeChildrenByFieldName(t *testing.T) {
 
 	tree := parser.Parse([]byte(source), nil)
 	defer tree.Close()
-	node := tree.RootNode().Child(0)
+	node := nodeMust(tree.RootNode().Child(0))
 	assert.Equal(t, "if_statement", node.Kind())
 
 	cursor := tree.Walk()
 	alternatives := node.ChildrenByFieldName("alternative", cursor)
 	var alternativeTexts []string
 	for _, alternative := range alternatives {
-		condition := alternative.ChildByFieldName("condition")
+		condition := nodeMust(alternative.ChildByFieldName("condition"))
 		alternativeTexts = append(alternativeTexts, string(source[condition.StartByte():condition.EndByte()]))
 	}
 	assert.Equal(t, []string{"two", "three", "four"}, alternativeTexts)
@@ -247,12 +250,12 @@ func TestNodeParentOfChildByFieldName(t *testing.T) {
 
 	tree := parser.Parse([]byte("foo(a().b[0].c.d.e())"), nil)
 	defer tree.Close()
-	callNode := tree.RootNode().NamedChild(0).NamedChild(0)
+	callNode := nodeMust(nodeMust(tree.RootNode().NamedChild(0)).NamedChild(0))
 	assert.Equal(t, "call_expression", callNode.Kind())
 
 	// Regression test - when a field points to a hidden node (in this case, `_expression`)
 	// the hidden node should not be added to the node parent cache.
-	assert.Equal(t, callNode, callNode.ChildByFieldName("function").Parent())
+	assert.Equal(t, callNode, nodeMust(nodeMust(callNode.ChildByFieldName("function")).Parent()))
 }
 
 func TestParentOfZeroWithNode(t *testing.T) {
@@ -265,17 +268,17 @@ func TestParentOfZeroWithNode(t *testing.T) {
 	tree := parser.Parse([]byte(code), nil)
 	defer tree.Close()
 	root := tree.RootNode()
-	functionDefinition := root.Child(0)
-	block := functionDefinition.Child(4)
-	blockParent := block.Parent()
+	functionDefinition := nodeMust(root.Child(0))
+	block := nodeMust(functionDefinition.Child(4))
+	blockParent := nodeMust(block.Parent())
 
 	assert.Equal(t, "(block)", block.ToSexp())
 	assert.Equal(t, "function_definition", blockParent.Kind())
 	assert.Equal(t, "(function_definition name: (identifier) parameters: (parameters (identifier)) body: (block))", blockParent.ToSexp())
 
-	assert.Equal(t, functionDefinition, root.ChildWithDescendant(block))
-	assert.Equal(t, block, functionDefinition.ChildWithDescendant(block))
-	assert.Nil(t, block.ChildWithDescendant(block))
+	assert.Equal(t, functionDefinition, nodeMust(root.ChildWithDescendant(block)))
+	assert.Equal(t, block, nodeMust(functionDefinition.ChildWithDescendant(block)))
+	assert.Nil(t, nodeMustNot(block.ChildWithDescendant(block)))
 }
 
 func TestFirstChildForOffset(t *testing.T) {
@@ -285,12 +288,12 @@ func TestFirstChildForOffset(t *testing.T) {
 	tree := parser.Parse([]byte("x10 + 100"), nil)
 	defer tree.Close()
 
-	sumNode := tree.RootNode().Child(0).Child(0)
+	sumNode := nodeMust(nodeMust(tree.RootNode().Child(0)).Child(0))
 
-	assert.Equal(t, "identifier", sumNode.FirstChildForByte(0).Kind())
-	assert.Equal(t, "identifier", sumNode.FirstChildForByte(1).Kind())
-	assert.Equal(t, "+", sumNode.FirstChildForByte(3).Kind())
-	assert.Equal(t, "number", sumNode.FirstChildForByte(5).Kind())
+	assert.Equal(t, "identifier", nodeMust(sumNode.FirstChildForByte(0)).Kind())
+	assert.Equal(t, "identifier", nodeMust(sumNode.FirstChildForByte(1)).Kind())
+	assert.Equal(t, "+", nodeMust(sumNode.FirstChildForByte(3)).Kind())
+	assert.Equal(t, "number", nodeMust(sumNode.FirstChildForByte(5)).Kind())
 }
 
 func TestFirstNamedChildForOffset(t *testing.T) {
@@ -300,11 +303,11 @@ func TestFirstNamedChildForOffset(t *testing.T) {
 	tree := parser.Parse([]byte("x10 + 100"), nil)
 	defer tree.Close()
 
-	sumNode := tree.RootNode().Child(0).Child(0)
+	sumNode := nodeMust(nodeMust(tree.RootNode().Child(0)).Child(0))
 
-	assert.Equal(t, "identifier", sumNode.FirstNamedChildForByte(0).Kind())
-	assert.Equal(t, "identifier", sumNode.FirstNamedChildForByte(1).Kind())
-	assert.Equal(t, "number", sumNode.FirstNamedChildForByte(3).Kind())
+	assert.Equal(t, "identifier", nodeMust(sumNode.FirstNamedChildForByte(0)).Kind())
+	assert.Equal(t, "identifier", nodeMust(sumNode.FirstNamedChildForByte(1)).Kind())
+	assert.Equal(t, "number", nodeMust(sumNode.FirstNamedChildForByte(3)).Kind())
 }
 
 func TestNodeFieldNameForChild(t *testing.T) {
@@ -315,9 +318,9 @@ func TestNodeFieldNameForChild(t *testing.T) {
 	tree := parser.Parse([]byte("int w = x + /* y is special! */ y;"), nil)
 	defer tree.Close()
 	translationUnitNode := tree.RootNode()
-	declarationNode := translationUnitNode.NamedChild(0)
+	declarationNode := nodeMust(translationUnitNode.NamedChild(0))
 
-	binaryExpressionNode := declarationNode.ChildByFieldName("declarator").ChildByFieldName("value")
+	binaryExpressionNode := nodeMust(nodeMust(declarationNode.ChildByFieldName("declarator")).ChildByFieldName("value"))
 
 	// -------------------
 	// left: (identifier)  0
@@ -343,9 +346,9 @@ func TestNodeFieldNameForNamedChild(t *testing.T) {
 	tree := parser.Parse([]byte("int w = x + /* y is special! */ y;"), nil)
 	defer tree.Close()
 	translationUnitNode := tree.RootNode()
-	declarationNode := translationUnitNode.NamedChild(0)
+	declarationNode := nodeMust(translationUnitNode.NamedChild(0))
 
-	binaryExpressionNode := declarationNode.ChildByFieldName("declarator").ChildByFieldName("value")
+	binaryExpressionNode := nodeMust(nodeMust(declarationNode.ChildByFieldName("declarator")).ChildByFieldName("value"))
 
 	// -------------------
 	// left: (identifier)  0
@@ -373,18 +376,18 @@ func TestNodeChildByFieldNameWithExtraHiddenChildren(t *testing.T) {
 	// Check that when searching for a child with a field name, we don't
 	tree := parser.Parse([]byte("while a:\n  pass"), nil)
 	defer tree.Close()
-	whileNode := tree.RootNode().Child(0)
+	whileNode := nodeMust(tree.RootNode().Child(0))
 	assert.Equal(t, "while_statement", whileNode.Kind())
-	assert.Equal(t, whileNode.Child(3), whileNode.ChildByFieldName("body"))
+	assert.Equal(t, nodeMust(whileNode.Child(3)), nodeMust(whileNode.ChildByFieldName("body")))
 }
 
 func TestNodeNamedChild(t *testing.T) {
 	tree := parseJsonExample()
-	arrayNode := tree.RootNode().Child(0)
+	arrayNode := nodeMust(tree.RootNode().Child(0))
 
-	numberNode := arrayNode.NamedChild(0)
-	falseNode := arrayNode.NamedChild(1)
-	objectNode := arrayNode.NamedChild(2)
+	numberNode := nodeMust(arrayNode.NamedChild(0))
+	falseNode := nodeMust(arrayNode.NamedChild(1))
+	objectNode := nodeMust(arrayNode.NamedChild(2))
 
 	assert.Equal(t, "number", numberNode.Kind())
 	assert.EqualValues(t, strings.Index(JSON_EXAMPLE, "123"), numberNode.StartByte())
@@ -404,15 +407,15 @@ func TestNodeNamedChild(t *testing.T) {
 	assert.Equal(t, Point{7, 3}, objectNode.EndPosition())
 	assert.EqualValues(t, 1, objectNode.NamedChildCount())
 
-	pairNode := objectNode.NamedChild(0)
+	pairNode := nodeMust(objectNode.NamedChild(0))
 	assert.Equal(t, "pair", pairNode.Kind())
 	assert.EqualValues(t, strings.Index(JSON_EXAMPLE, "\"x\""), pairNode.StartByte())
 	assert.EqualValues(t, strings.Index(JSON_EXAMPLE, "null")+4, pairNode.EndByte())
 	assert.Equal(t, Point{6, 4}, pairNode.StartPosition())
 	assert.Equal(t, Point{6, 13}, pairNode.EndPosition())
 
-	stringNode := pairNode.NamedChild(0)
-	nullNode := pairNode.NamedChild(1)
+	stringNode := nodeMust(pairNode.NamedChild(0))
+	nullNode := nodeMust(pairNode.NamedChild(1))
 
 	assert.Equal(t, "string", stringNode.Kind())
 	assert.Equal(t, "null", nullNode.Kind())
@@ -427,20 +430,22 @@ func TestNodeNamedChild(t *testing.T) {
 	assert.Equal(t, Point{6, 9}, nullNode.StartPosition())
 	assert.Equal(t, Point{6, 13}, nullNode.EndPosition())
 
-	assert.Equal(t, pairNode, stringNode.Parent())
-	assert.Equal(t, pairNode, nullNode.Parent())
-	assert.Equal(t, objectNode, pairNode.Parent())
-	assert.Equal(t, arrayNode, numberNode.Parent())
-	assert.Equal(t, arrayNode, falseNode.Parent())
-	assert.Equal(t, arrayNode, objectNode.Parent())
-	assert.Equal(t, tree.RootNode(), arrayNode.Parent())
-	assert.Nil(t, tree.RootNode().Parent())
+	rootNode := tree.RootNode()
 
-	assert.Equal(t, arrayNode, tree.RootNode().ChildWithDescendant(nullNode))
-	assert.Equal(t, objectNode, arrayNode.ChildWithDescendant(nullNode))
-	assert.Equal(t, pairNode, objectNode.ChildWithDescendant(nullNode))
-	assert.Equal(t, nullNode, pairNode.ChildWithDescendant(nullNode))
-	assert.Nil(t, nullNode.ChildWithDescendant(nullNode))
+	assert.Equal(t, pairNode, nodeMust(stringNode.Parent()))
+	assert.Equal(t, pairNode, nodeMust(nullNode.Parent()))
+	assert.Equal(t, objectNode, nodeMust(pairNode.Parent()))
+	assert.Equal(t, arrayNode, nodeMust(numberNode.Parent()))
+	assert.Equal(t, arrayNode, nodeMust(falseNode.Parent()))
+	assert.Equal(t, arrayNode, nodeMust(objectNode.Parent()))
+	assert.Equal(t, rootNode, nodeMust(arrayNode.Parent()))
+	assert.Nil(t, nodeMustNot(tree.RootNode().Parent()))
+
+	assert.Equal(t, arrayNode, nodeMust(tree.RootNode().ChildWithDescendant(nullNode)))
+	assert.Equal(t, objectNode, nodeMust(arrayNode.ChildWithDescendant(nullNode)))
+	assert.Equal(t, pairNode, nodeMust(objectNode.ChildWithDescendant(nullNode)))
+	assert.Equal(t, nullNode, nodeMust(pairNode.ChildWithDescendant(nullNode)))
+	assert.Nil(t, nodeMustNot(nullNode.ChildWithDescendant(nullNode)))
 }
 
 func TestNodeDescendantCount(t *testing.T) {
@@ -453,12 +458,12 @@ func TestNodeDescendantCount(t *testing.T) {
 	cursor := valueNode.Walk()
 	for i, node := range allNodes {
 		cursor.GotoDescendant(uint32(i))
-		assert.Equal(t, node, cursor.Node())
+		assert.Equal(t, *node, cursor.Node())
 	}
 
 	for i := len(allNodes) - 1; i >= 0; i-- {
 		cursor.GotoDescendant(uint32(i))
-		assert.Equal(t, allNodes[i], cursor.Node())
+		assert.Equal(t, *allNodes[i], cursor.Node())
 	}
 }
 
@@ -477,10 +482,10 @@ func TestDescendantCountSingleNodeTree(t *testing.T) {
 
 	cursor.GotoDescendant(0)
 	assert.EqualValues(t, 0, cursor.Depth())
-	assert.Equal(t, allNodes[0], cursor.Node())
+	assert.Equal(t, *allNodes[0], cursor.Node())
 	cursor.GotoDescendant(1)
 	assert.EqualValues(t, 1, cursor.Depth())
-	assert.Equal(t, allNodes[1], cursor.Node())
+	assert.Equal(t, *allNodes[1], cursor.Node())
 }
 
 func TestNodeDescendantForRange(t *testing.T) {
@@ -489,7 +494,7 @@ func TestNodeDescendantForRange(t *testing.T) {
 
 	// Leaf node exactly matches the given bounds - byte query
 	colonIndex := strings.Index(JSON_EXAMPLE, ":")
-	colonNode := arrayNode.DescendantForByteRange(uint(colonIndex), uint(colonIndex+1))
+	colonNode := nodeMust(arrayNode.DescendantForByteRange(uint(colonIndex), uint(colonIndex+1)))
 	assert.NotNil(t, colonNode)
 	assert.Equal(t, ":", colonNode.Kind())
 	assert.EqualValues(t, colonIndex, colonNode.StartByte())
@@ -498,7 +503,7 @@ func TestNodeDescendantForRange(t *testing.T) {
 	assert.Equal(t, Point{6, 8}, colonNode.EndPosition())
 
 	// Leaf node exactly matches the given bounds - point query
-	colonNode = arrayNode.DescendantForPointRange(Point{6, 7}, Point{6, 8})
+	colonNode = nodeMust(arrayNode.DescendantForPointRange(Point{6, 7}, Point{6, 8}))
 	assert.NotNil(t, colonNode)
 	assert.Equal(t, ":", colonNode.Kind())
 	assert.EqualValues(t, colonIndex, colonNode.StartByte())
@@ -507,7 +512,7 @@ func TestNodeDescendantForRange(t *testing.T) {
 	assert.Equal(t, Point{6, 8}, colonNode.EndPosition())
 
 	// The given point is between two adjacent leaf nodes - byte query
-	colonNode = arrayNode.DescendantForByteRange(uint(colonIndex), uint(colonIndex))
+	colonNode = nodeMust(arrayNode.DescendantForByteRange(uint(colonIndex), uint(colonIndex)))
 	assert.NotNil(t, colonNode)
 	assert.Equal(t, ":", colonNode.Kind())
 	assert.EqualValues(t, colonIndex, colonNode.StartByte())
@@ -516,7 +521,7 @@ func TestNodeDescendantForRange(t *testing.T) {
 	assert.Equal(t, Point{6, 8}, colonNode.EndPosition())
 
 	// The given point is between two adjacent leaf nodes - point query
-	colonNode = arrayNode.DescendantForPointRange(Point{6, 7}, Point{6, 7})
+	colonNode = nodeMust(arrayNode.DescendantForPointRange(Point{6, 7}, Point{6, 7}))
 	assert.NotNil(t, colonNode)
 	assert.Equal(t, ":", colonNode.Kind())
 	assert.EqualValues(t, colonIndex, colonNode.StartByte())
@@ -526,7 +531,7 @@ func TestNodeDescendantForRange(t *testing.T) {
 
 	// Leaf node starts at the lower bound, ends after the upper bound - byte query
 	stringIndex := strings.Index(JSON_EXAMPLE, "\"x\"")
-	stringNode := arrayNode.DescendantForByteRange(uint(stringIndex), uint(stringIndex+2))
+	stringNode := nodeMust(arrayNode.DescendantForByteRange(uint(stringIndex), uint(stringIndex+2)))
 	assert.NotNil(t, stringNode)
 	assert.Equal(t, "string", stringNode.Kind())
 	assert.EqualValues(t, stringIndex, stringNode.StartByte())
@@ -535,7 +540,7 @@ func TestNodeDescendantForRange(t *testing.T) {
 	assert.Equal(t, Point{6, 7}, stringNode.EndPosition())
 
 	// Leaf node starts at the lower bound, ends after the upper bound - point query
-	stringNode = arrayNode.DescendantForPointRange(Point{6, 4}, Point{6, 6})
+	stringNode = nodeMust(arrayNode.DescendantForPointRange(Point{6, 4}, Point{6, 6}))
 	assert.NotNil(t, stringNode)
 	assert.Equal(t, "string", stringNode.Kind())
 	assert.EqualValues(t, stringIndex, stringNode.StartByte())
@@ -545,7 +550,7 @@ func TestNodeDescendantForRange(t *testing.T) {
 
 	// Leaf node starts before the lower bound, ends at the upper bound - byte query
 	nullIndex := strings.Index(JSON_EXAMPLE, "null")
-	nullNode := arrayNode.DescendantForByteRange(uint(nullIndex+1), uint(nullIndex+4))
+	nullNode := nodeMust(arrayNode.DescendantForByteRange(uint(nullIndex+1), uint(nullIndex+4)))
 	assert.NotNil(t, nullNode)
 	assert.Equal(t, "null", nullNode.Kind())
 	assert.EqualValues(t, nullIndex, nullNode.StartByte())
@@ -554,7 +559,7 @@ func TestNodeDescendantForRange(t *testing.T) {
 	assert.Equal(t, Point{6, 13}, nullNode.EndPosition())
 
 	// Leaf node starts before the lower bound, ends at the upper bound - point query
-	nullNode = arrayNode.DescendantForPointRange(Point{6, 11}, Point{6, 13})
+	nullNode = nodeMust(arrayNode.DescendantForPointRange(Point{6, 11}, Point{6, 13}))
 	assert.NotNil(t, nullNode)
 	assert.Equal(t, "null", nullNode.Kind())
 	assert.EqualValues(t, nullIndex, nullNode.StartByte())
@@ -563,7 +568,7 @@ func TestNodeDescendantForRange(t *testing.T) {
 	assert.Equal(t, Point{6, 13}, nullNode.EndPosition())
 
 	// The bounds span multiple leaf nodes - return the smallest node that does span it.
-	pairNode := arrayNode.DescendantForByteRange(uint(stringIndex+2), uint(stringIndex+4))
+	pairNode := nodeMust(arrayNode.DescendantForByteRange(uint(stringIndex+2), uint(stringIndex+4)))
 	assert.NotNil(t, pairNode)
 	assert.Equal(t, "pair", pairNode.Kind())
 	assert.EqualValues(t, stringIndex, pairNode.StartByte())
@@ -571,10 +576,10 @@ func TestNodeDescendantForRange(t *testing.T) {
 	assert.Equal(t, Point{6, 4}, pairNode.StartPosition())
 	assert.Equal(t, Point{6, 13}, pairNode.EndPosition())
 
-	assert.Equal(t, colonNode.Parent(), pairNode)
+	assert.Equal(t, nodeMust(colonNode.Parent()), pairNode)
 
 	// no leaf spans the given range - return the smallest node that does span it.
-	pairNode = arrayNode.NamedDescendantForPointRange(Point{6, 6}, Point{6, 8})
+	pairNode = nodeMust(arrayNode.NamedDescendantForPointRange(Point{6, 6}, Point{6, 8}))
 	assert.NotNil(t, pairNode)
 	assert.Equal(t, "pair", pairNode.Kind())
 	assert.EqualValues(t, stringIndex, pairNode.StartByte())
@@ -583,8 +588,8 @@ func TestNodeDescendantForRange(t *testing.T) {
 	assert.Equal(t, Point{6, 13}, pairNode.EndPosition())
 
 	// Negative test, start > end
-	assert.Nil(t, arrayNode.DescendantForByteRange(1, 0))
-	assert.Nil(t, arrayNode.DescendantForPointRange(Point{6, 8}, Point{6, 7}))
+	assert.Nil(t, nodeMustNot(arrayNode.DescendantForByteRange(1, 0)))
+	assert.Nil(t, nodeMustNot(arrayNode.DescendantForPointRange(Point{6, 8}, Point{6, 7})))
 }
 
 func TestNodeEdit(t *testing.T) {
@@ -624,7 +629,7 @@ func TestRootNodeWithOffset(t *testing.T) {
 	assert.Equal(t, Point{2, 4}, node.StartPosition())
 	assert.Equal(t, Point{2, 12}, node.EndPosition())
 
-	child := node.Child(0).Child(2)
+	child := nodeMust(nodeMust(node.Child(0)).Child(2))
 	assert.Equal(t, "expression_statement", child.Kind())
 	assert.EqualValues(t, 15, child.StartByte())
 	assert.EqualValues(t, 16, child.EndByte())
@@ -651,7 +656,7 @@ func TestNodeIsExtra(t *testing.T) {
 	defer tree.Close()
 
 	rootNode := tree.RootNode()
-	commentNode := rootNode.DescendantForByteRange(7, 7)
+	commentNode := nodeMust(rootNode.DescendantForByteRange(7, 7))
 
 	assert.Equal(t, "program", rootNode.Kind())
 	assert.Equal(t, "comment", commentNode.Kind())
@@ -670,7 +675,7 @@ func TestNodeIsError(t *testing.T) {
 	assert.Equal(t, "program", rootNode.Kind())
 	assert.True(t, rootNode.HasError())
 
-	child := rootNode.Child(0)
+	child := nodeMust(rootNode.Child(0))
 	assert.Equal(t, "ERROR", child.Kind())
 	assert.True(t, child.IsError())
 }
@@ -683,9 +688,9 @@ func TestNodeSexp(t *testing.T) {
 	defer tree.Close()
 
 	rootNode := tree.RootNode()
-	ifNode := rootNode.DescendantForByteRange(0, 0)
-	parenNode := rootNode.DescendantForByteRange(3, 3)
-	identifierNode := rootNode.DescendantForByteRange(4, 4)
+	ifNode := nodeMust(rootNode.DescendantForByteRange(0, 0))
+	parenNode := nodeMust(rootNode.DescendantForByteRange(3, 3))
+	identifierNode := nodeMust(rootNode.DescendantForByteRange(4, 4))
 
 	assert.Equal(t, "if", ifNode.Kind())
 	assert.Equal(t, "(\"if\")", ifNode.ToSexp())
@@ -715,10 +720,10 @@ func TestNodeNumericSymbolsRespectSimpleAliases(t *testing.T) {
 		root.ToSexp(),
 	)
 
-	outExprNode := root.Child(0).Child(0)
+	outExprNode := nodeMust(nodeMust(root.Child(0)).Child(0))
 	assert.Equal(t, "parenthesized_expression", outExprNode.Kind())
 
-	innerExprNode := outExprNode.NamedChild(0).ChildByFieldName("arguments").NamedChild(0)
+	innerExprNode := nodeMust(nodeMust(nodeMust(outExprNode.NamedChild(0)).ChildByFieldName("arguments")).NamedChild(0))
 	assert.Equal(t, "parenthesized_expression", innerExprNode.Kind())
 	assert.Equal(t, outExprNode.KindId(), innerExprNode.KindId())
 
@@ -735,13 +740,13 @@ func TestNodeNumericSymbolsRespectSimpleAliases(t *testing.T) {
 		root.ToSexp(),
 	)
 
-	binaryNode := root.Child(0)
+	binaryNode := nodeMust(root.Child(0))
 	assert.Equal(t, "binary", binaryNode.Kind())
 
-	unaryMinusNode := binaryNode.ChildByFieldName("left").Child(0)
+	unaryMinusNode := nodeMust(nodeMust(binaryNode.ChildByFieldName("left")).Child(0))
 	assert.Equal(t, "-", unaryMinusNode.Kind())
 
-	binaryMinusNode := binaryNode.ChildByFieldName("operator")
+	binaryMinusNode := nodeMust(binaryNode.ChildByFieldName("operator"))
 	assert.Equal(t, "-", binaryMinusNode.Kind())
 	assert.Equal(t, unaryMinusNode.KindId(), binaryMinusNode.KindId())
 }
@@ -762,11 +767,11 @@ private:
 	defer tree.Close()
 	root := tree.RootNode()
 
-	classSpecifier := root.Child(0)
-	fieldDeclList := classSpecifier.ChildByFieldName("body")
-	fieldDecl := fieldDeclList.NamedChild(0)
-	fieldIdent := fieldDecl.ChildByFieldName("declarator")
-	assert.Equal(t, fieldIdent, fieldDecl.ChildWithDescendant(fieldIdent))
+	classSpecifier := nodeMust(root.Child(0))
+	fieldDeclList := nodeMust(classSpecifier.ChildByFieldName("body"))
+	fieldDecl := nodeMust(fieldDeclList.NamedChild(0))
+	fieldIdent := nodeMust(fieldDecl.ChildByFieldName("declarator"))
+	assert.Equal(t, fieldIdent, nodeMust(fieldDecl.ChildWithDescendant(fieldIdent)))
 }
 
 func getAllNodes(tree *Tree) []*Node {
@@ -775,7 +780,8 @@ func getAllNodes(tree *Tree) []*Node {
 	cursor := tree.Walk()
 	for {
 		if !visitedChildren {
-			result = append(result, cursor.Node())
+			node := cursor.Node()
+			result = append(result, &node)
 			if !cursor.GotoFirstChild() {
 				visitedChildren = true
 			}
@@ -793,4 +799,18 @@ func parseJsonExample() *Tree {
 	defer parser.Close()
 	parser.SetLanguage(getLanguage("json"))
 	return parser.Parse([]byte(JSON_EXAMPLE), nil)
+}
+
+func nodeMust(node Node, ok bool) Node {
+	if !ok {
+		panic("node is nil")
+	}
+	return node
+}
+
+func nodeMustNot(_ Node, ok bool) *Node {
+	if ok {
+		panic("node is not nil")
+	}
+	return nil
 }
