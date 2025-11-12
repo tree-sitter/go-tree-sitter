@@ -106,11 +106,9 @@ type QueryMatch struct {
 
 // A sequence of [QueryMatch]es associated with a given [QueryCursor].
 type QueryMatches struct {
-	_inner  *C.TSQueryCursor
-	query   *Query
-	text    []byte
-	buffer1 []byte
-	buffer2 []byte
+	_inner *C.TSQueryCursor
+	query  *Query
+	text   []byte
 }
 
 // A sequence of [QueryCapture]s associated with a given [QueryCursor].
@@ -751,11 +749,9 @@ func (qc *QueryCursor) DidExceedMatchLimit() bool {
 func (qc *QueryCursor) Matches(query *Query, node *Node, text []byte) QueryMatches {
 	C.ts_query_cursor_exec(qc._inner, query._inner, node._inner)
 	qm := QueryMatches{
-		_inner:  qc._inner,
-		query:   query,
-		text:    text,
-		buffer1: []byte{},
-		buffer2: []byte{},
+		_inner: qc._inner,
+		query:  query,
+		text:   text,
 	}
 	if qm._inner != qc._inner {
 		panic("inner pointers of `QueryCursor` and `QueryMatches` are not equal")
@@ -792,11 +788,9 @@ func (qc *QueryCursor) MatchesWithOptions(query *Query, node *Node, text []byte,
 	C.ts_query_cursor_exec_with_options(qc._inner, query._inner, node._inner, cOptions)
 
 	qm := QueryMatches{
-		_inner:  qc._inner,
-		query:   query,
-		text:    text,
-		buffer1: []byte{},
-		buffer2: []byte{},
+		_inner: qc._inner,
+		query:  query,
+		text:   text,
 	}
 	if qm._inner != qc._inner {
 		panic("inner pointers of `QueryCursor` and `QueryMatches` are not equal")
@@ -914,7 +908,7 @@ func (qm *QueryMatch) NodesForCaptureIndex(captureIndex uint) []Node {
 	return nodes
 }
 
-func (qm *QueryMatch) SatisfiesTextPredicate(query *Query, buffer1, buffer2 []byte, text []byte) bool {
+func (qm *QueryMatch) satisfiesTextPredicate(query *Query, text []byte) bool {
 	satisfies := true
 
 	condition := func(predicate TextPredicateCapture) bool {
@@ -1024,10 +1018,8 @@ func (qm *QueryMatches) Next() *QueryMatch {
 		defer C.free(unsafe.Pointer(m))
 		if C.ts_query_cursor_next_match(qm._inner, m) {
 			result := newQueryMatch(m, qm._inner)
-			if result.SatisfiesTextPredicate(
+			if result.satisfiesTextPredicate(
 				qm.query,
-				qm.buffer1,
-				qm.buffer2,
 				qm.text,
 			) {
 				return &result
@@ -1050,10 +1042,8 @@ func (qc *QueryCaptures) Next() (*QueryMatch, uint) {
 		var captureIndex C.uint32_t
 		if C.ts_query_cursor_next_capture(qc._inner, m, &captureIndex) {
 			result := newQueryMatch(m, qc._inner)
-			if result.SatisfiesTextPredicate(
+			if result.satisfiesTextPredicate(
 				qc.query,
-				qc.buffer1,
-				qc.buffer2,
 				qc.text,
 			) {
 				return &result, uint(captureIndex)
