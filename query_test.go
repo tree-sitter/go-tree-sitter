@@ -3881,6 +3881,53 @@ func TestQueryCapturesAndMatchesIteratorsAreFused(t *testing.T) {
 	assert.Nil(t, matches.Next())
 }
 
+func TestQueryCapturesAndMatchesIter(t *testing.T) {
+	language := getLanguage("javascript")
+	query, err := NewQuery(
+		language,
+		`
+		(comment) @comment
+		`,
+	)
+	assert.Nil(t, err)
+	defer query.Close()
+
+	source := `
+		// one
+		// two
+		// three
+		/* unfinished
+	`
+
+	parser := NewParser()
+	defer parser.Close()
+	parser.SetLanguage(language)
+
+	tree := parser.Parse([]byte(source), nil)
+	defer tree.Close()
+
+	cursor := NewQueryCursor()
+	defer cursor.Close()
+
+	captureSlice := make([]*QueryMatch, 0)
+	indexSlice := make([]uint, 0)
+	for capture, i := range cursor.IterCaptures(query, tree.RootNode(), []byte(source)) {
+		captureSlice = append(captureSlice, capture)
+		indexSlice = append(indexSlice, i)
+	}
+
+	assert.Len(t, captureSlice, 3)
+	assert.EqualValues(t, indexSlice, []uint{0,0,0})
+
+	matchesSlice := make([]*QueryMatch, 0)
+
+	for match := range cursor.IterMatches(query, tree.RootNode(), []byte(source)) {
+		matchesSlice = append(matchesSlice, match)
+	}
+
+	assert.Len(t, matchesSlice, 3)
+}
+
 func TestQueryStartEndByteForPattern(t *testing.T) {
 	language := getLanguage("javascript")
 
