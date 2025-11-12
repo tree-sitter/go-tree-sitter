@@ -20,39 +20,43 @@ var (
 )
 
 func init() {
-	malloc_fn.Store(func(size C.size_t) unsafe.Pointer {
-		return C.malloc(size)
-	})
-	calloc_fn.Store(func(num, size C.size_t) unsafe.Pointer {
-		return C.calloc(num, size)
-	})
-	realloc_fn.Store(func(ptr unsafe.Pointer, size C.size_t) unsafe.Pointer {
-		return C.realloc(ptr, size)
-	})
-	free_fn.Store(func(ptr unsafe.Pointer) {
-		C.free(ptr)
-	})
-	SetAllocator(nil, nil, nil, nil)
+	malloc_fn.Store((func(C.size_t) unsafe.Pointer)(nil))
+	calloc_fn.Store((func(C.size_t, C.size_t) unsafe.Pointer)(nil))
+	realloc_fn.Store((func(unsafe.Pointer, C.size_t) unsafe.Pointer)(nil))
+	free_fn.Store((func(unsafe.Pointer))(nil))
 }
 
 //export go_malloc
 func go_malloc(size C.size_t) unsafe.Pointer {
-	return malloc_fn.Load().(func(C.size_t) unsafe.Pointer)(size)
+	if fn := malloc_fn.Load().(func(C.size_t) unsafe.Pointer); fn != nil {
+		return fn(size)
+	}
+	return C.malloc(size)
 }
 
 //export go_calloc
 func go_calloc(num, size C.size_t) unsafe.Pointer {
-	return calloc_fn.Load().(func(C.size_t, C.size_t) unsafe.Pointer)(num, size)
+	if fn := calloc_fn.Load().(func(C.size_t, C.size_t) unsafe.Pointer); fn != nil {
+		return fn(num, size)
+	}
+	return C.calloc(num, size)
 }
 
 //export go_realloc
 func go_realloc(ptr unsafe.Pointer, size C.size_t) unsafe.Pointer {
-	return realloc_fn.Load().(func(unsafe.Pointer, C.size_t) unsafe.Pointer)(ptr, size)
+	if fn := realloc_fn.Load().(func(unsafe.Pointer, C.size_t) unsafe.Pointer); fn != nil {
+		return fn(ptr, size)
+	}
+	return C.realloc(ptr, size)
 }
 
 //export go_free
 func go_free(ptr unsafe.Pointer) {
-	free_fn.Load().(func(unsafe.Pointer))(ptr)
+	if fn := free_fn.Load().(func(unsafe.Pointer)); fn != nil {
+		fn(ptr)
+		return
+	}
+	C.free(ptr)
 }
 
 // Sets the memory allocation functions that the core library should use.
@@ -62,6 +66,16 @@ func SetAllocator(
 	newRealloc func(ptr unsafe.Pointer, size uint) unsafe.Pointer,
 	newFree func(ptr unsafe.Pointer),
 ) {
+	if newMalloc == nil && newCalloc == nil && newRealloc == nil && newFree == nil {
+		malloc_fn.Store((func(C.size_t) unsafe.Pointer)(nil))
+		calloc_fn.Store((func(C.size_t, C.size_t) unsafe.Pointer)(nil))
+		realloc_fn.Store((func(unsafe.Pointer, C.size_t) unsafe.Pointer)(nil))
+		free_fn.Store((func(unsafe.Pointer))(nil))
+
+		C.ts_set_allocator(nil, nil, nil, nil)
+		return
+	}
+
 	if newMalloc != nil {
 		malloc_fn.Store(func(size C.size_t) unsafe.Pointer {
 			return newMalloc(uint(size))
@@ -102,10 +116,24 @@ func SetAllocator(
 		})
 	}
 
+	var cMalloc, cCalloc, cRealloc, cFree unsafe.Pointer
+	if newMalloc != nil {
+		cMalloc = unsafe.Pointer(C.c_malloc_fn)
+	}
+	if newCalloc != nil {
+		cCalloc = unsafe.Pointer(C.c_calloc_fn)
+	}
+	if newRealloc != nil {
+		cRealloc = unsafe.Pointer(C.c_realloc_fn)
+	}
+	if newFree != nil {
+		cFree = unsafe.Pointer(C.c_free_fn)
+	}
+
 	C.ts_set_allocator(
-		(*[0]byte)(C.c_malloc_fn),
-		(*[0]byte)(C.c_calloc_fn),
-		(*[0]byte)(C.c_realloc_fn),
-		(*[0]byte)(C.c_free_fn),
+		(*[0]byte)(cMalloc),
+		(*[0]byte)(cCalloc),
+		(*[0]byte)(cRealloc),
+		(*[0]byte)(cFree),
 	)
 }
